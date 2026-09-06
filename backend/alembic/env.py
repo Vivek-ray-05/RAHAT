@@ -16,7 +16,19 @@ from app.config import settings
 # Import every model module so its table registers on SQLModel.metadata
 # before autogenerate compares against it. Add new model modules here
 # as they're created.
-from app.models import user, zone, shelter, road, scenario, simulation  # noqa: F401
+from app.models import (  # noqa: F401
+    user,
+    zone,
+    shelter,
+    road,
+    scenario,
+    simulation,
+    sensor_event,
+    citizen_report,
+    risk_score,
+    vulnerability_score,
+    route_option,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
