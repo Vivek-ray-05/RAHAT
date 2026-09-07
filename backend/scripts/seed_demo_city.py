@@ -172,8 +172,11 @@ def seed() -> None:
             select(Road).where(Road.from_zone_id == marathahalli.id, Road.to_zone_id == bellandur.id)
         ).first()
         if not existing_road:
-            session.add(Road(from_zone_id=marathahalli.id, to_zone_id=bellandur.id, capacity=None))
-            session.add(Road(from_zone_id=bellandur.id, to_zone_id=marathahalli.id, capacity=None))
+            # ~5.5km is the commonly cited distance between these two
+            # localities via Outer Ring Road -- an approximate real-world
+            # figure, not GPS-precise.
+            session.add(Road(from_zone_id=marathahalli.id, to_zone_id=bellandur.id, capacity=None, distance_km=5.5))
+            session.add(Road(from_zone_id=bellandur.id, to_zone_id=marathahalli.id, capacity=None, distance_km=5.5))
             session.commit()
             print("Created Outer Ring Road segments (Marathahalli <-> Bellandur, both directions)")
         else:
