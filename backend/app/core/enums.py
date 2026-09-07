@@ -31,3 +31,16 @@ class RouteStatus(str, Enum):
     DEGRADED = "degraded"
     BLOCKED = "blocked"
 
+class RecommendationStatus(str, Enum):
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    MODIFIED = "modified"
+    REJECTED = "rejected"
+    EXECUTED = "executed"
+    EXPIRED = "expired"
+
+
+class ApprovalActionType(str, Enum):
+    APPROVE = "approve"
+    MODIFY = "modify"
+    REJECT = "reject"
