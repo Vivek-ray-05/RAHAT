@@ -28,6 +28,9 @@ from app.models import (  # noqa: F401
     risk_score,
     vulnerability_score,
     route_option,
+    recommendation,
+    approval_action,
+    audit_event,
 )
 
 # this is the Alembic Config object, which provides
