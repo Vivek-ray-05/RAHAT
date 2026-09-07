@@ -6,15 +6,16 @@ each zone's route to its nearest shelter, and persists all of it --
 this is the real state, in Postgres, not an in-memory dict that
 vanishes on restart.
 
-No evacuation decision is executed here -- this file only produces
-the scoring data a plan would be built from. Turning that into an
-actual recommendation a zone admin can approve/reject is Phase 4.
+If a tick's conditions warrant it, a replan is triggered and turned
+into pending recommendations -- nothing is executed automatically,
+that only happens once a zone admin approves.
 """
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
 from app.core.enums import SimulationStatus
+from app.engines.governor.decision_governor import DecisionGovernor, ShelterState, ZoneState
 from app.engines.mobility.mobility_agent import MobilityEngine
 from app.engines.risk.risk_agent import RiskEngine
 from app.engines.vulnerability.vulnerability_agent import score_zone as score_vulnerability
@@ -27,19 +28,21 @@ from app.models.shelter import Shelter
 from app.models.simulation import SimulationRun, SimulationTick
 from app.models.vulnerability_score import VulnerabilityScore
 from app.models.zone import Zone
+from app.services import recommendation_service, trigger_evaluator
 
 
 class SimulationError(Exception):
     pass
 
 
-# One RiskEngine/MobilityEngine per active run, so stateful bits (soil
-# saturation history, the routing graph) persist correctly across
-# ticks. Process-local -- fine for a single backend worker; a
-# multi-worker deployment would need this moved to something shared
-# (Phase 6 concern, not relevant yet).
+# One RiskEngine/MobilityEngine/DecisionGovernor per active run, so
+# stateful bits (soil saturation history, the routing graph, replan
+# cooldown) persist correctly across ticks. Process-local -- fine for
+# a single backend worker; a multi-worker deployment would need this
+# moved to something shared (Phase 6 concern, not relevant yet).
 _risk_engines: dict[int, RiskEngine] = {}
 _mobility_engines: dict[int, MobilityEngine] = {}
+_governors: dict[int, DecisionGovernor] = {}
 
 
 def start_simulation(session: Session, scenario_id: int, started_by_user_id: int) -> SimulationRun:
@@ -77,6 +80,12 @@ def _get_mobility_engine(run_id: int, zones: list[Zone], roads: list[Road], shel
     if run_id not in _mobility_engines:
         _mobility_engines[run_id] = MobilityEngine(zones, roads, shelters)
     return _mobility_engines[run_id]
+
+
+def _get_governor(run_id: int) -> DecisionGovernor:
+    if run_id not in _governors:
+        _governors[run_id] = DecisionGovernor()
+    return _governors[run_id]
 
 
 def advance_tick(session: Session, run: SimulationRun) -> SimulationTick:
@@ -171,6 +180,26 @@ def advance_tick(session: Session, run: SimulationRun) -> SimulationTick:
             ))
 
     session.commit()
+
+    # 6. Check if this tick warrants a replan -- if so, generate a plan
+    # and turn it into pending recommendations. Nothing here executes
+    # anything on its own; that only happens once a human approves.
+    trigger = trigger_evaluator.evaluate_tick(next_tick_number, risk_by_zone, routes_by_zone)
+    if trigger is not None:
+        governor = _get_governor(run.id)
+        zone_states = [
+            ZoneState(
+                zone.id, zone.code, zone.name, zone.population, zone.elderly_pct,
+                risk_by_zone[zone.id]["score"], vuln_by_zone[zone.id]["score"],
+                risk_by_zone[zone.id]["time_to_critical"],
+            )
+            for zone in zones
+        ]
+        shelter_states = [ShelterState(s.id, s.name, s.capacity, s.current_occupancy) for s in shelters]
+
+        plan = governor.handle_replan(trigger, zone_states, routes_by_zone, shelter_states)
+        recommendation_service.create_from_plan(session, run.id, tick.id, plan)
+
     return tick
 
 
@@ -198,4 +227,5 @@ def complete_simulation(session: Session, run: SimulationRun) -> SimulationRun:
     session.refresh(run)
     _risk_engines.pop(run.id, None)
     _mobility_engines.pop(run.id, None)
+    _governors.pop(run.id, None)
     return run
