@@ -1,28 +1,42 @@
 """
 Seeds real Bengaluru localities using actual OpenStreetMap data: real
-road names from the geojson extracts (backend/data/*.geojson), real
-hospitals/schools/community centres pulled live from the Overpass
-API, and real elevation from SRTM (via opentopodata.org).
+building counts (via a live Overpass count query) for a population
+estimate, real hospitals/schools/community centres, and real
+elevation from SRTM (via opentopodata.org). 28 real, well-known
+Bengaluru localities, not the 198 official administrative wards --
+enough for a genuine city-scale dataset without being an
+administrative exercise.
 
-What's real: locality names, road names, hospital counts, named
+What's real: locality names and centers, hospital counts, named
 shelter candidates (schools/community halls -- the actual real-world
-convention for designated flood-relief shelters in Bengaluru), and
-per-zone elevation in meters.
+convention for designated flood-relief shelters in Bengaluru),
+building-derived population estimate, and per-zone elevation in
+meters.
 
-What's estimated, and clearly labeled as such: population (derived
-from OSM building count x an assumed average occupancy -- not a
-census figure), elderly_pct (no public source wired in yet), and
-shelter capacity (OSM has no capacity data for these buildings).
+What's estimated, and clearly labeled as such: population (building
+count x an assumed occupancy figure, not a census number), elderly_pct
+(a single citywide estimate, no per-locality source available yet),
+and shelter capacity (OSM has no capacity data for these buildings).
 
-elevation_tier is not a fixed lookup -- it's computed by ranking every
-seeded zone's real elevation and splitting into thirds (lowest third =
-low, highest third = high). What matters for flood risk is a zone's
-elevation relative to the others being modeled, not an arbitrary
-absolute meter cutoff.
+elevation_tier is computed by ranking every seeded zone's real
+elevation and splitting into thirds -- what matters for flood risk is
+a zone's elevation relative to the others being modeled, not an
+arbitrary absolute cutoff. Re-running this script with a different
+set of zones will re-rank everyone -- that's intentional, not a bug.
+
+Road connectivity between zones is NOT built here -- that comes from
+a real road network (OSMnx), which will also replace the single
+hand-picked Marathahalli<->Bellandur road this script used to create
+originally.
+
+The public Overpass instance is shared and sometimes overloaded
+(429/504 responses) -- every live query here retries with backoff,
+and large requests are split into small batches rather than one huge
+request, since that's what was actually timing out in practice.
 """
 import json
-import math
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -38,95 +52,132 @@ from app.models import (  # noqa: F401 -- import so tables register
 )
 from app.models.zone import Zone
 from app.models.shelter import Shelter
-from app.models.road import Road
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm30m"
 USER_AGENT = "RAHAT-seed-script/1.0 (contact: dishaagarwal023@gmail.com)"
 
-# Avg people per residential building -- a documented estimate, not a
-# real demographic figure. Revisit with real census/ward data later.
-ASSUMED_OCCUPANTS_PER_BUILDING = 4
+BUILDING_COUNT_RADIUS_M = 1500
+AMENITY_BATCH_SIZE = 4  # zones per Overpass amenities request -- 28 in one request timed out
+MAX_RETRIES = 3
+ASSUMED_OCCUPANTS_PER_BUILDING = 4  # documented estimate, not a real demographic figure
 DEFAULT_SHELTER_CAPACITY = 500  # estimate -- OSM has no capacity data
+CITYWIDE_ELDERLY_PCT = 8.0  # single citywide estimate, no per-locality source available yet
 
 ZONE_DEFS = [
-    {
-        "code": "Z01",
-        "name": "Marathahalli",
-        "geojson_file": "marathhalli.geojson",
-        "center": (12.9591, 77.6974),
-        "elderly_pct": 8.5,  # estimated, no real source yet
-    },
-    {
-        "code": "Z02",
-        "name": "Bellandur",
-        "geojson_file": "bellanduru.geojson",
-        "center": (12.9304, 77.6784),
-        "elderly_pct": 7.0,  # estimated, no real source yet
-    },
+    {"code": "Z01", "name": "Marathahalli", "center": (12.9591, 77.6974)},
+    {"code": "Z02", "name": "Bellandur", "center": (12.9304, 77.6784)},
+    {"code": "Z03", "name": "Indiranagar", "center": (12.9719, 77.6412)},
+    {"code": "Z04", "name": "Koramangala", "center": (12.9352, 77.6245)},
+    {"code": "Z05", "name": "HSR Layout", "center": (12.9121, 77.6446)},
+    {"code": "Z06", "name": "Whitefield", "center": (12.9698, 77.7500)},
+    {"code": "Z07", "name": "Electronic City", "center": (12.8452, 77.6602)},
+    {"code": "Z08", "name": "Jayanagar", "center": (12.9250, 77.5938)},
+    {"code": "Z09", "name": "Malleswaram", "center": (13.0027, 77.5709)},
+    {"code": "Z10", "name": "Yelahanka", "center": (13.1007, 77.5963)},
+    {"code": "Z11", "name": "Sarjapur Road", "center": (12.9105, 77.6879)},
+    {"code": "Z12", "name": "Hebbal", "center": (13.0358, 77.5970)},
+    {"code": "Z13", "name": "RT Nagar", "center": (13.0198, 77.5938)},
+    {"code": "Z14", "name": "Rajajinagar", "center": (12.9911, 77.5529)},
+    {"code": "Z15", "name": "Basavanagudi", "center": (12.9422, 77.5760)},
+    {"code": "Z16", "name": "Banashankari", "center": (12.9255, 77.5468)},
+    {"code": "Z17", "name": "Vijayanagar", "center": (12.9719, 77.5300)},
+    {"code": "Z18", "name": "CV Raman Nagar", "center": (12.9880, 77.6636)},
+    {"code": "Z19", "name": "Domlur", "center": (12.9611, 77.6387)},
+    {"code": "Z20", "name": "Ulsoor", "center": (12.9815, 77.6205)},
+    {"code": "Z21", "name": "Frazer Town", "center": (12.9967, 77.6119)},
+    {"code": "Z22", "name": "JP Nagar", "center": (12.9077, 77.5851)},
+    {"code": "Z23", "name": "BTM Layout", "center": (12.9166, 77.6101)},
+    {"code": "Z24", "name": "Krishnarajapuram", "center": (13.0027, 77.6959)},
+    {"code": "Z25", "name": "Bommanahalli", "center": (12.8990, 77.6228)},
+    {"code": "Z26", "name": "Peenya", "center": (13.0286, 77.5203)},
+    {"code": "Z27", "name": "Yeshwanthpur", "center": (13.0284, 77.5540)},
+    {"code": "Z28", "name": "Banaswadi", "center": (13.0140, 77.6494)},
 ]
 
 
-def count_buildings(geojson_path: Path) -> int:
-    data = json.loads(geojson_path.read_text(encoding="utf-8"))
-    return sum(1 for f in data["features"] if f["properties"].get("building"))
+def _fetch_json_with_retry(req: urllib.request.Request, timeout: int) -> dict | None:
+    """POST/GET a request, retrying with backoff on failure. Returns
+    None (caller decides the fallback) if every attempt fails."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                print(f"  request failed after {MAX_RETRIES} attempts: {e}")
+                return None
+            wait = 3 * attempt
+            print(f"  request failed ({e}), retrying in {wait}s (attempt {attempt}/{MAX_RETRIES})...")
+            time.sleep(wait)
+    return None
 
 
-def fetch_real_amenities() -> list[dict]:
-    """Live Overpass API query for real hospitals/schools/community
-    centres within 2km of each zone center. Falls back to an empty
-    list (zones just get 0 hospitals / no shelter candidates) if the
-    API is unreachable, so seeding still works offline."""
-    centers = [z["center"] for z in ZONE_DEFS]
-    around_clauses = "\n".join(
-        f'  node["amenity"~"hospital|school|community_centre"](around:2000,{lat},{lon});'
-        for lat, lon in centers
-    )
+def fetch_building_count(lat: float, lon: float) -> int:
     query = f"""
     [out:json][timeout:25];
     (
-    {around_clauses}
+      way["building"](around:{BUILDING_COUNT_RADIUS_M},{lat},{lon});
+      node["building"](around:{BUILDING_COUNT_RADIUS_M},{lat},{lon});
     );
-    out body;
+    out count;
     """
-    try:
+    req = urllib.request.Request(
+        OVERPASS_URL, data=query.encode("utf-8"), method="POST",
+        headers={"User-Agent": USER_AGENT},
+    )
+    data = _fetch_json_with_retry(req, timeout=30)
+    if data is None:
+        return 0
+    elements = data.get("elements", [])
+    if elements and "tags" in elements[0]:
+        return int(elements[0]["tags"].get("total", 0))
+    return 0
+
+
+def fetch_real_amenities_batched() -> list[dict]:
+    """Live Overpass query for real hospitals/schools/community
+    centres, split into small batches of AMENITY_BATCH_SIZE zones per
+    request -- one big request for all 28 zones timed out in practice."""
+    all_elements: list[dict] = []
+    for i in range(0, len(ZONE_DEFS), AMENITY_BATCH_SIZE):
+        batch = ZONE_DEFS[i:i + AMENITY_BATCH_SIZE]
+        around_clauses = "\n".join(
+            f'  node["amenity"~"hospital|school|community_centre"](around:2000,{lat},{lon});'
+            for lat, lon in (z["center"] for z in batch)
+        )
+        query = f"""
+        [out:json][timeout:40];
+        (
+        {around_clauses}
+        );
+        out body;
+        """
         req = urllib.request.Request(
             OVERPASS_URL, data=query.encode("utf-8"), method="POST",
             headers={"User-Agent": USER_AGENT},
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data.get("elements", [])
-    except Exception as e:
-        print(f"WARNING: Overpass API unreachable ({e}); seeding without real hospital/shelter data")
-        return []
+        print(f"  amenities batch {i // AMENITY_BATCH_SIZE + 1} "
+              f"({', '.join(z['name'] for z in batch)})...")
+        data = _fetch_json_with_retry(req, timeout=60)
+        if data:
+            all_elements.extend(data.get("elements", []))
+        time.sleep(2)
+    return all_elements
 
 
 def fetch_elevations() -> dict[str, float]:
-    """Live SRTM elevation lookup (opentopodata.org) for every zone's
-    center, batched into one request. Falls back to 0.0 for every zone
-    (flat -> all zones land in the same tier) if unreachable."""
-    locations = "|".join(f"{lat},{lon}" for _, lat_lon in enumerate(z["center"] for z in ZONE_DEFS)
-                          for lat, lon in [lat_lon])
+    locations = "|".join(f"{lat},{lon}" for lat, lon in (z["center"] for z in ZONE_DEFS))
     url = f"{OPENTOPODATA_URL}?locations={locations}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        elevations = {}
-        for zdef, result in zip(ZONE_DEFS, data["results"]):
-            elevations[zdef["code"]] = result["elevation"]
-        return elevations
-    except Exception as e:
-        print(f"WARNING: opentopodata unreachable ({e}); all zones will get elevation_m=0.0")
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    data = _fetch_json_with_retry(req, timeout=30)
+    if data is None:
+        print("WARNING: opentopodata unreachable; all zones will get elevation_m=0.0")
         return {zdef["code"]: 0.0 for zdef in ZONE_DEFS}
+    return {zdef["code"]: result["elevation"] for zdef, result in zip(ZONE_DEFS, data["results"])}
 
 
 def classify_elevation_tiers(elevations: dict[str, float]) -> dict[str, ElevationTier]:
-    """Rank zones by real elevation and split into thirds. Relative,
-    not an absolute cutoff -- what matters for flood risk is how a
-    zone compares to the others being modeled."""
     sorted_codes = sorted(elevations, key=lambda c: elevations[c])
     n = len(sorted_codes)
     edge_cut = max(1, round(n / 3))
@@ -145,20 +196,23 @@ def classify_elevation_tiers(elevations: dict[str, float]) -> dict[str, Elevatio
 def nearest_zone_code(lat: float, lon: float) -> str:
     def dist(z):
         clat, clon = z["center"]
-        return math.hypot(lat - clat, lon - clon)
+        return ((lat - clat) ** 2 + (lon - clon) ** 2) ** 0.5
 
     return min(ZONE_DEFS, key=dist)["code"]
 
 
 def seed() -> None:
     init_db()
-    amenities = fetch_real_amenities()
+
+    print(f"Fetching real amenities for {len(ZONE_DEFS)} zones from Overpass (batched)...")
+    amenities = fetch_real_amenities_batched()
+
+    print("Fetching real elevation from opentopodata...")
     elevations = fetch_elevations()
     elevation_tiers = classify_elevation_tiers(elevations)
 
     hospital_counts: dict[str, int] = {z["code"]: 0 for z in ZONE_DEFS}
     shelter_candidates: dict[str, list[str]] = {z["code"]: [] for z in ZONE_DEFS}
-
     for el in amenities:
         tags = el.get("tags", {})
         amenity = tags.get("amenity")
@@ -170,87 +224,85 @@ def seed() -> None:
         elif amenity in ("school", "community_centre") and name:
             shelter_candidates[code].append(name)
 
+    print("Fetching real building counts for population estimates...")
+    building_counts: dict[str, int] = {}
+    for i, zdef in enumerate(ZONE_DEFS):
+        lat, lon = zdef["center"]
+        print(f"  {zdef['name']} ({i + 1}/{len(ZONE_DEFS)})...")
+        building_counts[zdef["code"]] = fetch_building_count(lat, lon)
+        time.sleep(2)
+
     with Session(engine) as session:
         zones_by_code: dict[str, Zone] = {}
 
         for zdef in ZONE_DEFS:
             code = zdef["code"]
+            building_count = building_counts[code]
+            population_estimate = building_count * ASSUMED_OCCUPANTS_PER_BUILDING
+
             existing = session.exec(select(Zone).where(Zone.code == code)).first()
             if existing:
+                existing.population = population_estimate
+                existing.hospital_count = hospital_counts[code]
                 existing.elevation_m = round(elevations[code])
                 existing.elevation_tier = elevation_tiers[code]
                 session.add(existing)
                 session.commit()
                 session.refresh(existing)
                 zones_by_code[code] = existing
-                print(f"Zone {code} already exists, backfilled elevation_m={existing.elevation_m} "
-                      f"tier={existing.elevation_tier.value}")
+                print(f"Updated zone {code} ({existing.name}): population~{population_estimate} "
+                      f"(from {building_count} buildings), hospital_count={existing.hospital_count}, "
+                      f"elevation_m={existing.elevation_m} (tier={existing.elevation_tier.value})")
                 continue
 
-            geojson_path = DATA_DIR / zdef["geojson_file"]
-            building_count = count_buildings(geojson_path)
-            population_estimate = building_count * ASSUMED_OCCUPANTS_PER_BUILDING
-
             z = Zone(
-                code=code,
-                name=zdef["name"],
-                population=population_estimate,
-                elderly_pct=zdef["elderly_pct"],
-                population_density=None,  # would need real area figures to compute properly
-                elevation_tier=elevation_tiers[code],
-                elevation_m=round(elevations[code]),
-                hospital_count=hospital_counts[code],
-                flood_risk_base=None,
+                code=code, name=zdef["name"], population=population_estimate,
+                elderly_pct=CITYWIDE_ELDERLY_PCT, population_density=None,
+                elevation_tier=elevation_tiers[code], elevation_m=round(elevations[code]),
+                hospital_count=hospital_counts[code], flood_risk_base=None,
             )
             session.add(z)
             session.commit()
             session.refresh(z)
             zones_by_code[code] = z
             print(f"Created zone {z.code} ({z.name}): population~{population_estimate} "
-                  f"(from {building_count} buildings x {ASSUMED_OCCUPANTS_PER_BUILDING}), "
-                  f"real hospital_count={z.hospital_count}, real elevation_m={z.elevation_m} "
-                  f"(tier={z.elevation_tier.value})")
+                  f"(from {building_count} buildings), real hospital_count={z.hospital_count}, "
+                  f"real elevation_m={z.elevation_m} (tier={z.elevation_tier.value})")
 
-        # Real road, both directions, connecting the two real zones --
-        # "Outer Ring Road" genuinely appears in both geojson extracts
-        # and is the actual road connecting these two localities.
-        marathahalli = zones_by_code["Z01"]
-        bellandur = zones_by_code["Z02"]
+        # Replace any placeholder shelters with real ones now that we
+        # have real candidate names for that zone.
+        for zdef in ZONE_DEFS:
+            code = zdef["code"]
+            if not shelter_candidates[code]:
+                continue
+            zone_ = zones_by_code[code]
+            placeholders = session.exec(
+                select(Shelter).where(Shelter.zone_id == zone_.id, Shelter.name.like("[PLACEHOLDER]%"))
+            ).all()
+            for p in placeholders:
+                session.delete(p)
+            if placeholders:
+                session.commit()
+                print(f"Removed {len(placeholders)} placeholder shelter(s) for {zdef['name']}")
 
-        existing_road = session.exec(
-            select(Road).where(Road.from_zone_id == marathahalli.id, Road.to_zone_id == bellandur.id)
-        ).first()
-        if not existing_road:
-            # ~5.5km is the commonly cited distance between these two
-            # localities via Outer Ring Road -- an approximate real-world
-            # figure, not GPS-precise.
-            session.add(Road(from_zone_id=marathahalli.id, to_zone_id=bellandur.id, capacity=None, distance_km=5.5))
-            session.add(Road(from_zone_id=bellandur.id, to_zone_id=marathahalli.id, capacity=None, distance_km=5.5))
-            session.commit()
-            print("Created Outer Ring Road segments (Marathahalli <-> Bellandur, both directions)")
-        else:
-            print("Road already exists, skipping")
+        existing_codes = session.exec(select(Shelter.code)).all()
+        next_num = max((int(c[1:]) for c in existing_codes), default=0) + 1
 
-        # Real named schools/community centres as shelter candidates
-        # (schools/halls are the actual real-world designated
-        # flood-shelter convention in Bengaluru) -- capacity is still
-        # an estimate, OSM has no capacity data for these buildings.
-        shelter_counter = 1
         for zdef in ZONE_DEFS:
             code = zdef["code"]
             zone_ = zones_by_code[code]
-            names = shelter_candidates[code][:2]  # cap at 2 per zone for a manageable demo dataset
+            names = shelter_candidates[code][:2]  # cap at 2 per zone for a manageable dataset
+
+            existing_for_zone = session.exec(select(Shelter).where(Shelter.zone_id == zone_.id)).all()
+            if existing_for_zone:
+                continue  # already has real (or still-placeholder, unresolved) shelters
 
             if not names:
                 names = [f"[PLACEHOLDER] {zdef['name']} Community Shelter"]
 
             for name in names:
-                shelter_code = f"S{shelter_counter:02d}"
-                shelter_counter += 1
-                existing_shelter = session.exec(select(Shelter).where(Shelter.code == shelter_code)).first()
-                if existing_shelter:
-                    print(f"Shelter {shelter_code} already exists, skipping")
-                    continue
+                shelter_code = f"S{next_num:02d}"
+                next_num += 1
                 session.add(Shelter(
                     code=shelter_code, name=name, zone_id=zone_.id,
                     capacity=DEFAULT_SHELTER_CAPACITY, has_medical=False,
