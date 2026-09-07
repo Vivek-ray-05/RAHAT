@@ -1,19 +1,24 @@
 """
-Seeds two real Bengaluru localities (Marathahalli, Bellandur) using
-actual OpenStreetMap data -- real road names from the static geojson
-extracts (backend/data/*.geojson), and real hospitals/schools/
-community centres pulled live from the Overpass API.
+Seeds real Bengaluru localities using actual OpenStreetMap data: real
+road names from the geojson extracts (backend/data/*.geojson), real
+hospitals/schools/community centres pulled live from the Overpass
+API, and real elevation from SRTM (via opentopodata.org).
 
-What's real: locality names, real road names (e.g. "Outer Ring Road",
-which genuinely connects these two areas), real hospital counts and
-real named government schools/community centres used as shelter
-candidates (schools and community halls are the actual real-world
-convention for designated flood-relief shelters in Bengaluru).
+What's real: locality names, road names, hospital counts, named
+shelter candidates (schools/community halls -- the actual real-world
+convention for designated flood-relief shelters in Bengaluru), and
+per-zone elevation in meters.
 
 What's estimated, and clearly labeled as such: population (derived
 from OSM building count x an assumed average occupancy -- not a
 census figure), elderly_pct (no public source wired in yet), and
 shelter capacity (OSM has no capacity data for these buildings).
+
+elevation_tier is not a fixed lookup -- it's computed by ranking every
+seeded zone's real elevation and splitting into thirds (lowest third =
+low, highest third = high). What matters for flood risk is a zone's
+elevation relative to the others being modeled, not an arbitrary
+absolute meter cutoff.
 """
 import json
 import math
@@ -37,6 +42,8 @@ from app.models.road import Road
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm30m"
+USER_AGENT = "RAHAT-seed-script/1.0 (contact: dishaagarwal023@gmail.com)"
 
 # Avg people per residential building -- a documented estimate, not a
 # real demographic figure. Revisit with real census/ward data later.
@@ -49,11 +56,6 @@ ZONE_DEFS = [
         "name": "Marathahalli",
         "geojson_file": "marathhalli.geojson",
         "center": (12.9591, 77.6974),
-        # Bellandur is a known low-lying, flood-prone area near
-        # Bellandur Lake -- a well-documented fact about this part of
-        # Bengaluru, not a fabricated number. Marathahalli is
-        # comparatively mid-elevation relative to it.
-        "elevation_tier": ElevationTier.MID,
         "elderly_pct": 8.5,  # estimated, no real source yet
     },
     {
@@ -61,7 +63,6 @@ ZONE_DEFS = [
         "name": "Bellandur",
         "geojson_file": "bellanduru.geojson",
         "center": (12.9304, 77.6784),
-        "elevation_tier": ElevationTier.LOW,
         "elderly_pct": 7.0,  # estimated, no real source yet
     },
 ]
@@ -91,10 +92,8 @@ def fetch_real_amenities() -> list[dict]:
     """
     try:
         req = urllib.request.Request(
-            OVERPASS_URL,
-            data=query.encode("utf-8"),
-            method="POST",
-            headers={"User-Agent": "RAHAT-seed-script/1.0 (contact: dishaagarwal023@gmail.com)"},
+            OVERPASS_URL, data=query.encode("utf-8"), method="POST",
+            headers={"User-Agent": USER_AGENT},
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -102,6 +101,45 @@ def fetch_real_amenities() -> list[dict]:
     except Exception as e:
         print(f"WARNING: Overpass API unreachable ({e}); seeding without real hospital/shelter data")
         return []
+
+
+def fetch_elevations() -> dict[str, float]:
+    """Live SRTM elevation lookup (opentopodata.org) for every zone's
+    center, batched into one request. Falls back to 0.0 for every zone
+    (flat -> all zones land in the same tier) if unreachable."""
+    locations = "|".join(f"{lat},{lon}" for _, lat_lon in enumerate(z["center"] for z in ZONE_DEFS)
+                          for lat, lon in [lat_lon])
+    url = f"{OPENTOPODATA_URL}?locations={locations}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        elevations = {}
+        for zdef, result in zip(ZONE_DEFS, data["results"]):
+            elevations[zdef["code"]] = result["elevation"]
+        return elevations
+    except Exception as e:
+        print(f"WARNING: opentopodata unreachable ({e}); all zones will get elevation_m=0.0")
+        return {zdef["code"]: 0.0 for zdef in ZONE_DEFS}
+
+
+def classify_elevation_tiers(elevations: dict[str, float]) -> dict[str, ElevationTier]:
+    """Rank zones by real elevation and split into thirds. Relative,
+    not an absolute cutoff -- what matters for flood risk is how a
+    zone compares to the others being modeled."""
+    sorted_codes = sorted(elevations, key=lambda c: elevations[c])
+    n = len(sorted_codes)
+    edge_cut = max(1, round(n / 3))
+
+    tiers: dict[str, ElevationTier] = {}
+    for i, code in enumerate(sorted_codes):
+        if i < edge_cut:
+            tiers[code] = ElevationTier.LOW
+        elif i >= n - edge_cut:
+            tiers[code] = ElevationTier.HIGH
+        else:
+            tiers[code] = ElevationTier.MID
+    return tiers
 
 
 def nearest_zone_code(lat: float, lon: float) -> str:
@@ -115,6 +153,8 @@ def nearest_zone_code(lat: float, lon: float) -> str:
 def seed() -> None:
     init_db()
     amenities = fetch_real_amenities()
+    elevations = fetch_elevations()
+    elevation_tiers = classify_elevation_tiers(elevations)
 
     hospital_counts: dict[str, int] = {z["code"]: 0 for z in ZONE_DEFS}
     shelter_candidates: dict[str, list[str]] = {z["code"]: [] for z in ZONE_DEFS}
@@ -134,10 +174,17 @@ def seed() -> None:
         zones_by_code: dict[str, Zone] = {}
 
         for zdef in ZONE_DEFS:
-            existing = session.exec(select(Zone).where(Zone.code == zdef["code"])).first()
+            code = zdef["code"]
+            existing = session.exec(select(Zone).where(Zone.code == code)).first()
             if existing:
-                print(f"Zone {zdef['code']} already exists, skipping")
-                zones_by_code[zdef["code"]] = existing
+                existing.elevation_m = round(elevations[code])
+                existing.elevation_tier = elevation_tiers[code]
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
+                zones_by_code[code] = existing
+                print(f"Zone {code} already exists, backfilled elevation_m={existing.elevation_m} "
+                      f"tier={existing.elevation_tier.value}")
                 continue
 
             geojson_path = DATA_DIR / zdef["geojson_file"]
@@ -145,22 +192,24 @@ def seed() -> None:
             population_estimate = building_count * ASSUMED_OCCUPANTS_PER_BUILDING
 
             z = Zone(
-                code=zdef["code"],
+                code=code,
                 name=zdef["name"],
                 population=population_estimate,
                 elderly_pct=zdef["elderly_pct"],
                 population_density=None,  # would need real area figures to compute properly
-                elevation_tier=zdef["elevation_tier"],
-                hospital_count=hospital_counts[zdef["code"]],
+                elevation_tier=elevation_tiers[code],
+                elevation_m=round(elevations[code]),
+                hospital_count=hospital_counts[code],
                 flood_risk_base=None,
             )
             session.add(z)
             session.commit()
             session.refresh(z)
-            zones_by_code[zdef["code"]] = z
+            zones_by_code[code] = z
             print(f"Created zone {z.code} ({z.name}): population~{population_estimate} "
                   f"(from {building_count} buildings x {ASSUMED_OCCUPANTS_PER_BUILDING}), "
-                  f"real hospital_count={z.hospital_count}")
+                  f"real hospital_count={z.hospital_count}, real elevation_m={z.elevation_m} "
+                  f"(tier={z.elevation_tier.value})")
 
         # Real road, both directions, connecting the two real zones --
         # "Outer Ring Road" genuinely appears in both geojson extracts
