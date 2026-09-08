@@ -5,6 +5,8 @@ import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import CoordinatorDashboard from './pages/CoordinatorDashboard.jsx'
 import CitizenDashboard from './pages/CitizenDashboard.jsx'
+import ZoneAdminDashboard from './pages/ZoneAdminDashboard.jsx'
+import NDRFDashboard from './pages/NDRFDashboard.jsx'
 
 function App() {
   return (
@@ -26,6 +28,22 @@ function App() {
             element={
               <ProtectedRoute roles={['citizen']}>
                 <CitizenDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/zone"
+            element={
+              <ProtectedRoute roles={['zone_admin']}>
+                <ZoneAdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/rescue"
+            element={
+              <ProtectedRoute roles={['ndrf']}>
+                <NDRFDashboard />
               </ProtectedRoute>
             }
           />
