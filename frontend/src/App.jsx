@@ -1,8 +1,13 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import LandingPage from './pages/LandingPage.jsx'
+
 function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <h1 className="text-2xl font-semibold text-slate-800">RAHAT</h1>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
