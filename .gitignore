@@ -26,3 +26,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Cached OSM road network -- large (100MB+), regenerated on demand by
+# scripts/build_road_network.py, not source data we authored
+backend/data/*.graphml
+
+# OSMnx's own HTTP response cache
+cache/
