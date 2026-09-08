@@ -26,6 +26,7 @@ def create_from_plan(session: Session, simulation_run_id: int, simulation_tick_i
         rec = Recommendation(
             simulation_run_id=simulation_run_id,
             simulation_tick_id=simulation_tick_id,
+            zone_id=entry["zone_id"],
             type="evacuation_assignment",
             payload_json=entry,
             status=RecommendationStatus.PENDING_REVIEW,
@@ -41,10 +42,14 @@ def create_from_plan(session: Session, simulation_run_id: int, simulation_tick_i
     return created
 
 
-def get_pending(session: Session, simulation_run_id: int | None = None) -> list[Recommendation]:
+def get_pending(
+    session: Session, simulation_run_id: int | None = None, zone_id: int | None = None,
+) -> list[Recommendation]:
     query = select(Recommendation).where(Recommendation.status == RecommendationStatus.PENDING_REVIEW)
     if simulation_run_id is not None:
         query = query.where(Recommendation.simulation_run_id == simulation_run_id)
+    if zone_id is not None:
+        query = query.where(Recommendation.zone_id == zone_id)
     return session.exec(query).all()
 
 

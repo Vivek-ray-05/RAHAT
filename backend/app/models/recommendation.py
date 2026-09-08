@@ -9,6 +9,7 @@ class Recommendation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     simulation_run_id: int = Field(foreign_key="simulationrun.id")
     simulation_tick_id: int = Field(foreign_key="simulationtick.id")
+    zone_id: int = Field(foreign_key="zone.id")
     type: str
     payload_json: dict = Field(sa_column=Column(JSON, nullable=False))
     status: RecommendationStatus = Field(default=RecommendationStatus.PENDING_REVIEW)
