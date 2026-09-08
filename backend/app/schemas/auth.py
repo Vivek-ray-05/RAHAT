@@ -23,3 +23,4 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: int
     role: RoleEnum
+    zone_id: int | None = None

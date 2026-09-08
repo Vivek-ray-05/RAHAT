@@ -22,7 +22,7 @@ export function AuthProvider({ children }) {
     async (email, password, role) => {
       const data = await api.post('/auth/login', { email, password, role })
       setToken(data.access_token)
-      persistUser({ id: data.user_id, role: data.role })
+      persistUser({ id: data.user_id, role: data.role, zone_id: data.zone_id })
       return data
     },
     [persistUser]
@@ -36,7 +36,7 @@ export function AuthProvider({ children }) {
     async (phone, code) => {
       const data = await api.post('/auth/otp/verify', { phone, code })
       setToken(data.access_token)
-      persistUser({ id: data.user_id, role: data.role })
+      persistUser({ id: data.user_id, role: data.role, zone_id: data.zone_id })
       return data
     },
     [persistUser]

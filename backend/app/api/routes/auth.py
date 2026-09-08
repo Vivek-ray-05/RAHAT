@@ -16,7 +16,7 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
     token = auth_service.issue_token(user)
-    return TokenResponse(access_token=token, user_id=user.id, role=user.role)
+    return TokenResponse(access_token=token, user_id=user.id, role=user.role, zone_id=user.zone_id)
 
 
 @router.post("/otp/request")
@@ -40,4 +40,4 @@ def verify_otp(payload: OtpVerifyRequest, session: Session = Depends(get_session
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
     token = auth_service.issue_token(user)
-    return TokenResponse(access_token=token, user_id=user.id, role=user.role)
+    return TokenResponse(access_token=token, user_id=user.id, role=user.role, zone_id=user.zone_id)
