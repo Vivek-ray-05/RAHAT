@@ -9,6 +9,7 @@ class RecommendationResponse(BaseModel):
     id: int
     simulation_run_id: int
     simulation_tick_id: int
+    zone_id: int
     type: str
     payload_json: dict
     status: RecommendationStatus
