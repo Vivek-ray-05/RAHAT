@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../context/SocketContext'
 import { api } from '../api/client'
 
 export default function CoordinatorDashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { connect, disconnect, connected, latestTick, error: socketError } = useSocket()
 
   const [zones, setZones] = useState([])
   const [recommendations, setRecommendations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [watchRunId, setWatchRunId] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -33,9 +36,17 @@ export default function CoordinatorDashboard() {
     load()
   }, [load])
 
+  useEffect(() => () => disconnect(), [disconnect])
+
   function handleLogout() {
+    disconnect()
     logout()
     navigate('/login')
+  }
+
+  function handleWatchSubmit(e) {
+    e.preventDefault()
+    if (watchRunId) connect(Number(watchRunId))
   }
 
   const highRiskZones = zones.filter((z) => (z.flood_risk_base ?? 0) >= 5)
@@ -102,6 +113,46 @@ export default function CoordinatorDashboard() {
           </div>
         </div>
       )}
+
+      <div className="max-w-5xl mt-6 border border-gray-800 bg-surface-panel p-6">
+        <p className="font-mono text-green-400 text-sm font-bold mb-4">
+          LIVE_TICK_STREAM // {connected ? 'CONNECTED' : 'DISCONNECTED'}
+        </p>
+        <form onSubmit={handleWatchSubmit} className="flex gap-3 mb-4">
+          <input
+            type="number"
+            value={watchRunId}
+            onChange={(e) => setWatchRunId(e.target.value)}
+            placeholder="SIMULATION RUN ID"
+            className="bg-transparent border border-gray-700 focus:border-green-500 text-green-400 font-mono text-xs px-3 py-2 outline-none"
+          />
+          <button
+            type="submit"
+            className="font-mono text-green-400 text-xs tracking-widest border border-green-500 px-4 py-2 hover:bg-green-500/10"
+          >
+            WATCH
+          </button>
+          {connected && (
+            <button
+              type="button"
+              onClick={disconnect}
+              className="font-mono text-red-400 text-xs tracking-widest border border-red-500/50 px-4 py-2 hover:bg-red-500/10"
+            >
+              STOP
+            </button>
+          )}
+        </form>
+        {socketError && <p className="font-mono text-red-400 text-xs mb-2">{`ERROR: ${socketError}`}</p>}
+        {latestTick ? (
+          <p className="font-mono text-gray-400 text-xs">
+            tick {latestTick.tick_number} // {latestTick.timestamp}
+          </p>
+        ) : (
+          <p className="font-mono text-gray-500 text-xs">
+            No tick received yet. Enter a running simulation's id to watch it live.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
