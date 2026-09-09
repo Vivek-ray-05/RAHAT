@@ -8,16 +8,26 @@ export default function ZoneAdminDashboard() {
   const navigate = useNavigate()
 
   const [recommendations, setRecommendations] = useState([])
+  const [shelters, setShelters] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actingOn, setActingOn] = useState(null)
+
+  const [modifyingId, setModifyingId] = useState(null)
+  const [modifiedShelterId, setModifiedShelterId] = useState('')
+  const [modifiedPopulation, setModifiedPopulation] = useState('')
+  const [modifyReason, setModifyReason] = useState('')
 
   const loadRecommendations = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const data = await api.get('/recommendations')
-      setRecommendations(data)
+      const [recsData, sheltersData] = await Promise.all([
+        api.get('/recommendations'),
+        api.get('/shelters'),
+      ])
+      setRecommendations(recsData)
+      setShelters(sheltersData)
     } catch (err) {
       setError(err.message || 'Could not load recommendations')
     } finally {
@@ -53,6 +63,38 @@ export default function ZoneAdminDashboard() {
       await loadRecommendations()
     } catch (err) {
       setError(err.message || 'Reject failed')
+    } finally {
+      setActingOn(null)
+    }
+  }
+
+  function startModify(rec) {
+    setModifyingId(rec.id)
+    setModifiedShelterId(rec.payload_json.assigned_shelter_id ?? '')
+    setModifiedPopulation(rec.payload_json.assigned_population ?? 0)
+    setModifyReason('')
+  }
+
+  function cancelModify() {
+    setModifyingId(null)
+  }
+
+  async function handleModifySubmit(rec) {
+    setActingOn(rec.id)
+    try {
+      const modified_payload = {
+        ...rec.payload_json,
+        assigned_shelter_id: modifiedShelterId ? Number(modifiedShelterId) : null,
+        assigned_population: Number(modifiedPopulation) || 0,
+      }
+      await api.post(`/recommendations/${rec.id}/modify`, {
+        modified_payload,
+        reason: modifyReason || undefined,
+      })
+      setModifyingId(null)
+      await loadRecommendations()
+    } catch (err) {
+      setError(err.message || 'Modify failed')
     } finally {
       setActingOn(null)
     }
@@ -108,22 +150,81 @@ export default function ZoneAdminDashboard() {
               </span>
             </div>
             <p className="font-mono text-gray-400 text-xs mb-4">{rec.payload_json.reason}</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleApprove(rec.id)}
-                disabled={actingOn === rec.id}
-                className="font-mono text-green-400 text-xs tracking-widest border border-green-500 px-4 py-2 hover:bg-green-500/10 disabled:opacity-40"
-              >
-                {actingOn === rec.id ? 'WORKING...' : 'APPROVE'}
-              </button>
-              <button
-                onClick={() => handleReject(rec.id)}
-                disabled={actingOn === rec.id}
-                className="font-mono text-red-400 text-xs tracking-widest border border-red-500/50 px-4 py-2 hover:bg-red-500/10 disabled:opacity-40"
-              >
-                REJECT
-              </button>
-            </div>
+            <p className="font-mono text-gray-600 text-xs mb-4">
+              shelter: {rec.payload_json.assigned_shelter_id ?? 'none'} // population: {rec.payload_json.assigned_population ?? 0}
+            </p>
+
+            {modifyingId === rec.id ? (
+              <div className="flex flex-col gap-3 border-t border-gray-800 pt-4">
+                <select
+                  value={modifiedShelterId}
+                  onChange={(e) => setModifiedShelterId(e.target.value)}
+                  className="bg-transparent border border-gray-700 focus:border-green-500 text-green-400 font-mono text-xs px-3 py-2 outline-none"
+                >
+                  <option value="" className="bg-black">NO SHELTER</option>
+                  {shelters.map((s) => (
+                    <option key={s.id} value={s.id} className="bg-black">
+                      {s.name} ({s.current_occupancy}/{s.capacity})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min="0"
+                  value={modifiedPopulation}
+                  onChange={(e) => setModifiedPopulation(e.target.value)}
+                  placeholder="ASSIGNED POPULATION"
+                  className="bg-transparent border border-gray-700 focus:border-green-500 text-green-400 font-mono text-xs px-3 py-2 outline-none"
+                />
+                <input
+                  type="text"
+                  value={modifyReason}
+                  onChange={(e) => setModifyReason(e.target.value)}
+                  placeholder="REASON FOR MODIFICATION (OPTIONAL)"
+                  className="bg-transparent border border-gray-700 focus:border-green-500 text-green-400 font-mono text-xs px-3 py-2 outline-none placeholder:text-gray-600"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleModifySubmit(rec)}
+                    disabled={actingOn === rec.id}
+                    className="font-mono text-amber-400 text-xs tracking-widest border border-amber-500 px-4 py-2 hover:bg-amber-500/10 disabled:opacity-40"
+                  >
+                    {actingOn === rec.id ? 'WORKING...' : 'SAVE_AND_APPROVE'}
+                  </button>
+                  <button
+                    onClick={cancelModify}
+                    disabled={actingOn === rec.id}
+                    className="font-mono text-gray-400 text-xs tracking-widest border border-gray-600 px-4 py-2 hover:bg-gray-500/10 disabled:opacity-40"
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleApprove(rec.id)}
+                  disabled={actingOn === rec.id}
+                  className="font-mono text-green-400 text-xs tracking-widest border border-green-500 px-4 py-2 hover:bg-green-500/10 disabled:opacity-40"
+                >
+                  {actingOn === rec.id ? 'WORKING...' : 'APPROVE'}
+                </button>
+                <button
+                  onClick={() => startModify(rec)}
+                  disabled={actingOn === rec.id}
+                  className="font-mono text-amber-400 text-xs tracking-widest border border-amber-500/50 px-4 py-2 hover:bg-amber-500/10 disabled:opacity-40"
+                >
+                  MODIFY
+                </button>
+                <button
+                  onClick={() => handleReject(rec.id)}
+                  disabled={actingOn === rec.id}
+                  className="font-mono text-red-400 text-xs tracking-widest border border-red-500/50 px-4 py-2 hover:bg-red-500/10 disabled:opacity-40"
+                >
+                  REJECT
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
