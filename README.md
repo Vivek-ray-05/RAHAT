@@ -24,6 +24,17 @@ Deterministic risk, vulnerability, and route-planning engines score every zone f
 
 Log in as Coordinator to see the city overview; as a Zone Admin to review and act on pending recommendations; as NDRF to see an assigned evacuation route; as a Citizen to browse shelters and file an incident report.
 
+<table>
+<tr>
+<td><img src="docs/screenshots/01-landing.png" alt="Landing page"></td>
+<td><img src="docs/screenshots/02-coordinator.png" alt="Coordinator dashboard"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/03-zone-admin.png" alt="Zone admin approval queue"></td>
+<td><img src="docs/screenshots/04-citizen.png" alt="Citizen portal"></td>
+</tr>
+</table>
+
 ## What makes this real, not a mockup
 
 - **28 real Bengaluru localities** — real building-density-derived population, real SRTM elevation, real hospital counts and named shelter candidates, all pulled live from OpenStreetMap and opentopodata.org, not hand-typed.
