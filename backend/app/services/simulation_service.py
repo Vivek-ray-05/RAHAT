@@ -88,6 +88,13 @@ def _get_governor(run_id: int) -> DecisionGovernor:
     return _governors[run_id]
 
 
+def get_active_mobility_engine(run_id: int) -> MobilityEngine | None:
+    """The live routing graph for a run that has already ticked at
+    least once, if one exists -- used to apply a road block immediately
+    instead of waiting for the next tick to rebuild it."""
+    return _mobility_engines.get(run_id)
+
+
 def advance_tick(session: Session, run: SimulationRun) -> SimulationTick:
     if run.status != SimulationStatus.RUNNING:
         raise SimulationError(f"Cannot advance a {run.status.value} simulation")

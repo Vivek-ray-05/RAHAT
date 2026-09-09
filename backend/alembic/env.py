@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     zone,
     shelter,
     road,
+    road_block,
     scenario,
     simulation,
     sensor_event,
