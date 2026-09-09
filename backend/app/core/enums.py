@@ -44,3 +44,13 @@ class ApprovalActionType(str, Enum):
     APPROVE = "approve"
     MODIFY = "modify"
     REJECT = "reject"
+
+
+class NotificationChannel(str, Enum):
+    EMAIL = "email"
+
+
+class NotificationStatus(str, Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"

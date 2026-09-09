@@ -32,6 +32,7 @@ from app.models import (  # noqa: F401
     recommendation,
     approval_action,
     audit_event,
+    notification,
 )
 
 # this is the Alembic Config object, which provides

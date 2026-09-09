@@ -216,3 +216,47 @@ def test_modify_clamps_assigned_population_to_remaining_shelter_capacity(
     shelters_after = client.get("/shelters", headers=headers).json()
     updated = next(s for s in shelters_after if s["id"] == shelter.id)
     assert updated["current_occupancy"] == 500  # clamped to capacity, not 10450
+
+
+def test_creating_a_recommendation_notifies_that_zones_admin(session, make_user, make_zone, make_run, make_tick):
+    from sqlmodel import select
+    from app.models.notification import Notification
+    from app.services import recommendation_service
+
+    zone = make_zone(name="Notify Test Zone")
+    admin = make_user(RoleEnum.ZONE_ADMIN, password="pw", email="notifyme@test.dev", zone_id=zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+
+    plan = {
+        "evacuation_sequence": [
+            {"zone_id": zone.id, "zone_name": zone.name, "reason": "High risk", "assigned_shelter_id": None, "assigned_population": 0},
+        ]
+    }
+    recommendation_service.create_from_plan(session, run.id, tick.id, plan)
+
+    notifications = session.exec(select(Notification).where(Notification.user_id == admin.id)).all()
+    assert len(notifications) == 1
+    assert "Notify Test Zone" in notifications[0].subject
+
+
+def test_creating_a_recommendation_does_not_notify_a_different_zones_admin(session, make_user, make_zone, make_run, make_tick):
+    from sqlmodel import select
+    from app.models.notification import Notification
+    from app.services import recommendation_service
+
+    target_zone = make_zone()
+    other_zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="notme@test.dev", zone_id=other_zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+
+    plan = {
+        "evacuation_sequence": [
+            {"zone_id": target_zone.id, "zone_name": target_zone.name, "reason": "x", "assigned_shelter_id": None, "assigned_population": 0},
+        ]
+    }
+    recommendation_service.create_from_plan(session, run.id, tick.id, plan)
+
+    notifications = session.exec(select(Notification)).all()
+    assert len(notifications) == 0

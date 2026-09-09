@@ -9,16 +9,43 @@ from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select
 
 from app.core.enums import RecommendationStatus
+from app.core.roles import RoleEnum
 from app.models.recommendation import Recommendation
 from app.models.shelter import Shelter
+from app.models.user import User
+from app.services import notification_service
 
 RECOMMENDATION_TTL_MINUTES = 30
+
+
+def _notify_zone_admins(session: Session, rec: Recommendation) -> None:
+    """Best-effort -- a notification failure (or no provider configured)
+    never blocks recommendation creation, which is why any error here
+    is swallowed rather than propagated."""
+    admins = session.exec(
+        select(User).where(User.role == RoleEnum.ZONE_ADMIN, User.zone_id == rec.zone_id)
+    ).all()
+    zone_name = rec.payload_json.get("zone_name", f"zone {rec.zone_id}")
+    for admin in admins:
+        try:
+            notification_service.notify_user(
+                session, admin,
+                subject=f"New evacuation recommendation pending for {zone_name}",
+                body=(
+                    f"A new recommendation is waiting for your review in {zone_name}.\n"
+                    f"Reason: {rec.payload_json.get('reason', 'n/a')}\n"
+                    f"Log in to the RAHAT dashboard to approve, modify, or reject it."
+                ),
+            )
+        except Exception:
+            pass
 
 
 def create_from_plan(session: Session, simulation_run_id: int, simulation_tick_id: int, plan: dict) -> list[Recommendation]:
     """One Recommendation per zone entry in the plan's evacuation
     sequence. Every one starts pending_review -- nothing here is
-    applied to the city's state."""
+    applied to the city's state. Each zone's admin(s) get a real (or
+    best-effort) email once their recommendation exists."""
     now = datetime.now(timezone.utc)
     created = []
 
@@ -39,6 +66,8 @@ def create_from_plan(session: Session, simulation_run_id: int, simulation_tick_i
     session.commit()
     for rec in created:
         session.refresh(rec)
+    for rec in created:
+        _notify_zone_admins(session, rec)
     return created
 
 

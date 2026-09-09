@@ -52,10 +52,13 @@ class Settings(BaseSettings):
                 )
         return self
 
-    # Notification providers (Phase 6)
-    TWILIO_ACCOUNT_SID: str | None = None
-    TWILIO_AUTH_TOKEN: str | None = None
-    RESEND_API_KEY: str | None = None
+    # Notification provider (Phase 6) -- Brevo (formerly Sendinblue),
+    # chosen over Twilio/Resend for its free tier: 300 emails/day, no
+    # credit card, and no domain-verification requirement to reach an
+    # arbitrary recipient (Resend's free tier only reaches your own
+    # account email without a verified domain).
+    BREVO_API_KEY: str | None = None
+    BREVO_FROM_EMAIL: str | None = None
 
     # LLM providers (optional, used only for explanation/summary text)
     GROK_API_KEY: str | None = None
