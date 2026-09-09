@@ -16,20 +16,59 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
       dockerfile: docker/Dockerfile
+    image: rahat-backend:latest
     restart: unless-stopped
     env_file:
       - backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://rahat:rahat@postgres:5432/rahat
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  # A second backend instance sharing the same Postgres+Redis as
+  # `backend` -- exists to prove that Redis-backed state (OTP store,
+  # rate limiter, WS pub/sub) is genuinely shared across processes,
+  # not just working by accident because there's only ever one worker.
+  backend2:
+    image: rahat-backend:latest
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://rahat:rahat@postgres:5432/rahat
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
     volumes:
       - ./backend:/app
 

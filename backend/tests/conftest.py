@@ -6,10 +6,15 @@ exercises real service/engine code against them.
 
 Each test gets its own transaction that's rolled back afterward, so
 tests can't see each other's writes and never touch the dev database.
+
+Redis (OTP store, rate limiter) is likewise pointed at a separate
+logical DB index (1, vs. dev's 0) on the same Redis instance -- same
+isolation goal, without needing a second Redis container.
 """
 import os
 
 os.environ["DATABASE_URL"] = "postgresql+psycopg://rahat:rahat@localhost:5432/rahat_test"
+os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 
 import pytest
 from fastapi.testclient import TestClient

@@ -10,11 +10,13 @@ If a tick's conditions warrant it, a replan is triggered and turned
 into pending recommendations -- nothing is executed automatically,
 that only happens once a zone admin approves.
 """
+import json
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
 from app.core.enums import SimulationStatus
+from app.core.redis_client import redis_client
 from app.engines.governor.decision_governor import DecisionGovernor, ShelterState, ZoneState
 from app.engines.mobility.mobility_agent import MobilityEngine
 from app.engines.risk.risk_agent import RiskEngine
@@ -37,12 +39,23 @@ class SimulationError(Exception):
 
 # One RiskEngine/MobilityEngine/DecisionGovernor per active run, so
 # stateful bits (soil saturation history, the routing graph, replan
-# cooldown) persist correctly across ticks. Process-local -- fine for
-# a single backend worker; a multi-worker deployment would need this
-# moved to something shared (Phase 6 concern, not relevant yet).
+# cooldown) persist correctly across ticks. Still process-local even
+# after the Redis work below -- externalizing this would mean
+# serializing a live NetworkX graph and per-zone float histories on
+# every tick, which is real future work, not done here. Practical
+# consequence: in a genuine multi-replica deployment, tick-advancement
+# requests for one run must be sticky-routed to whichever replica
+# advanced its last tick, or soil-saturation/replan-cooldown state
+# resets unexpectedly. Everything else in this module (OTP, rate
+# limits, the tick-stream WS) has no such constraint -- it's all
+# Redis-backed and safe to hit any replica.
 _risk_engines: dict[int, RiskEngine] = {}
 _mobility_engines: dict[int, MobilityEngine] = {}
 _governors: dict[int, DecisionGovernor] = {}
+
+
+def tick_channel(run_id: int) -> str:
+    return f"simulation:{run_id}:ticks"
 
 
 def start_simulation(session: Session, scenario_id: int, started_by_user_id: int) -> SimulationRun:
@@ -210,6 +223,17 @@ def advance_tick(session: Session, run: SimulationRun) -> SimulationTick:
 
         plan = governor.handle_replan(trigger, zone_states, routes_by_zone, shelter_states)
         recommendation_service.create_from_plan(session, run.id, tick.id, plan)
+
+    # Push the new tick to anyone watching this run's WS, wherever that
+    # connection happens to be terminated -- pub/sub is what makes this
+    # work even when the WS client is attached to a different backend
+    # process than the one that just advanced the tick.
+    redis_client.publish(tick_channel(run.id), json.dumps({
+        "id": tick.id,
+        "tick_number": tick.tick_number,
+        "timestamp": tick.timestamp.isoformat(),
+        "raw_state_json": tick.raw_state_json,
+    }))
 
     return tick
 

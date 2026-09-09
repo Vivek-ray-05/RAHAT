@@ -1,21 +1,20 @@
 """
 Login/OTP business logic. Replaces the old prototype's backend/auth.py.
 """
-from datetime import datetime, timedelta, timezone
-
 from sqlmodel import Session, select
 
 from app.config import settings
+from app.core.redis_client import redis_client
 from app.core.roles import RoleEnum
 from app.core.security import create_access_token, verify_secret
 from app.models.user import User
 
-OTP_TTL_MINUTES = 10
+OTP_TTL_SECONDS = 10 * 60
 DEV_OTP_CODE = "1234"
 
-# phone -> (code, expires_at). In-memory only -- fine for local dev,
-# revisit once a real OTP provider is wired in (Phase 6).
-_otp_store: dict[str, tuple[str, datetime]] = {}
+
+def _otp_key(phone: str) -> str:
+    return f"otp:{phone}"
 
 
 class AuthError(Exception):
@@ -29,25 +28,22 @@ def request_otp(phone: str) -> str:
             "testing, or wire a real provider in services/notification_service.py."
         )
     code = DEV_OTP_CODE
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
-    _otp_store[phone] = (code, expires_at)
+    # Redis's own TTL does the expiry -- no manual expires_at bookkeeping,
+    # and (unlike an in-process dict) this is visible to every backend
+    # worker/container, not just whichever one handled this request.
+    redis_client.set(_otp_key(phone), code, ex=OTP_TTL_SECONDS)
     return code
 
 
 def verify_otp(session: Session, phone: str, code: str) -> User:
-    stored = _otp_store.get(phone)
-    if stored is None:
-        raise AuthError("No OTP was requested for this phone number.")
-
-    stored_code, expires_at = stored
-    if datetime.now(timezone.utc) > expires_at:
-        del _otp_store[phone]
-        raise AuthError("OTP has expired. Request a new one.")
+    stored_code = redis_client.get(_otp_key(phone))
+    if stored_code is None:
+        raise AuthError("No OTP was requested for this phone number, or it expired.")
 
     if code != stored_code:
         raise AuthError("Incorrect OTP.")
 
-    del _otp_store[phone]
+    redis_client.delete(_otp_key(phone))
 
     user = session.exec(select(User).where(User.phone == phone)).first()
     if user is None:

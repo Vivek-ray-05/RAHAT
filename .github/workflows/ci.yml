@@ -23,10 +23,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       JWT_SECRET: ci-test-secret-not-for-real-use
       DEV_MODE: "true"
       DATABASE_URL: postgresql+psycopg://rahat:rahat@localhost:5432/rahat_test
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -87,15 +97,19 @@ jobs:
       - name: Build and start the full stack
         run: docker compose up -d --build
 
-      - name: Wait for backend health check
+      - name: Wait for both backend replicas' health checks
         run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/health; then exit 0; fi
-            sleep 2
+          for port in 8000 8001; do
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:$port/health; then break; fi
+              if [ "$i" = "30" ]; then
+                echo "backend on port $port never became healthy"
+                docker compose logs
+                exit 1
+              fi
+              sleep 2
+            done
           done
-          echo "backend never became healthy"
-          docker compose logs
-          exit 1
 
       - name: Confirm frontend is serving
         run: |
@@ -106,6 +120,19 @@ jobs:
           echo "frontend never came up"
           docker compose logs
           exit 1
+
+      - name: Prove Redis state is shared across the two backend replicas
+        run: |
+          curl -sf -X POST http://localhost:8000/auth/otp/request \
+            -H "Content-Type: application/json" -d '{"phone":"9110001111"}' > /dev/null
+          verify_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/auth/otp/verify \
+            -H "Content-Type: application/json" -d '{"phone":"9110001111","code":"1234"}')
+          if [ "$verify_status" != "200" ]; then
+            echo "OTP requested on backend-1 could not be verified on backend-2 (got $verify_status) -- Redis state isn't actually shared"
+            docker compose logs backend backend2
+            exit 1
+          fi
+          echo "Confirmed: OTP requested on backend-1 (8000) was verified on backend-2 (8001) via shared Redis"
 
       - name: Tear down
         if: always()

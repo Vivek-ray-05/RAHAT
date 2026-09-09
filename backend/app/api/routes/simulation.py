@@ -1,10 +1,13 @@
 import asyncio
+import contextlib
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 from sqlmodel import Session
 
 from app.api.deps import get_current_user, require_role
+from app.core.redis_client import async_redis_client
 from app.core.roles import RoleEnum
 from app.core.security import decode_access_token
 from app.db.session import get_session
@@ -94,10 +97,35 @@ def complete(
     return svc.complete_simulation(session, run)
 
 
+async def _forward_ticks(pubsub, websocket: WebSocket, last_sent: list[int | None]) -> None:
+    async for message in pubsub.listen():
+        if message["type"] != "message":
+            continue
+        data = json.loads(message["data"])
+        if data["tick_number"] != last_sent[0]:
+            await websocket.send_json(data)
+            last_sent[0] = data["tick_number"]
+
+
+async def _wait_for_client_disconnect(websocket: WebSocket) -> None:
+    """pubsub.listen() only tells us about new Redis messages -- it has
+    no idea if the client is still there. Without this running
+    alongside it, a client that goes away leaves the handler blocked
+    forever waiting on Redis, which in turn blocks the server from
+    ever shutting down cleanly (found by an actual reload hanging
+    under load-test traffic, not by inspection)."""
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+
+
 @router.websocket("/{run_id}/ws")
 async def tick_stream(websocket: WebSocket, run_id: int, token: str, session: Session = Depends(get_session)):
-    """Tick-streaming WS, gated by a JWT passed as ?token=. Pushes a
-    new payload whenever the latest tick number changes."""
+    """Tick-streaming WS, gated by a JWT passed as ?token=. Pushed via
+    Redis pub/sub the moment a tick is advanced -- works even if the
+    request that advanced it landed on a different backend process
+    than this WS connection (see simulation_service.tick_channel)."""
     try:
         payload = decode_access_token(token)
         user = session.get(User, int(payload.get("sub")))
@@ -109,18 +137,39 @@ async def tick_stream(websocket: WebSocket, run_id: int, token: str, session: Se
         return
 
     await websocket.accept()
-    last_sent_tick_number: int | None = None
+    last_sent_tick_number: list[int | None] = [None]
+
+    pubsub = async_redis_client.pubsub()
+    await pubsub.subscribe(svc.tick_channel(run_id))
     try:
-        while True:
-            tick = svc.get_latest_tick(session, run_id)
-            if tick is not None and tick.tick_number != last_sent_tick_number:
-                await websocket.send_json({
-                    "id": tick.id,
-                    "tick_number": tick.tick_number,
-                    "timestamp": tick.timestamp.isoformat(),
-                    "raw_state_json": tick.raw_state_json,
-                })
-                last_sent_tick_number = tick.tick_number
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        pass
+        # Catch up first: a tick may already exist from before this
+        # connection subscribed, and pub/sub only delivers messages
+        # published after subscribe() -- it wouldn't replay that one.
+        latest = svc.get_latest_tick(session, run_id)
+        if latest is not None:
+            await websocket.send_json({
+                "id": latest.id,
+                "tick_number": latest.tick_number,
+                "timestamp": latest.timestamp.isoformat(),
+                "raw_state_json": latest.raw_state_json,
+            })
+            last_sent_tick_number[0] = latest.tick_number
+
+        forward_task = asyncio.create_task(_forward_ticks(pubsub, websocket, last_sent_tick_number))
+        disconnect_task = asyncio.create_task(_wait_for_client_disconnect(websocket))
+        try:
+            done, pending = await asyncio.wait(
+                [forward_task, disconnect_task], return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            for task in done:
+                if task.exception() and not isinstance(task.exception(), WebSocketDisconnect):
+                    raise task.exception()
+        except WebSocketDisconnect:
+            pass
+    finally:
+        await pubsub.unsubscribe(svc.tick_channel(run_id))
+        await pubsub.aclose()

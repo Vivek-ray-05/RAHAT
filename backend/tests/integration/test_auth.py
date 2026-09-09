@@ -51,6 +51,31 @@ def test_otp_verify_fails_with_wrong_code(client):
     assert r.status_code == 401
 
 
+def test_otp_is_stored_in_redis_with_a_ttl(client):
+    """The OTP store moved from an in-process dict to Redis so it's
+    shared across backend replicas -- this checks the actual Redis key
+    Redis's own expiry (not a manual expires_at field) is what makes
+    an old OTP eventually unusable."""
+    from app.services import auth_service
+
+    client.post("/auth/otp/request", json={"phone": "9996665555"})
+    key = auth_service._otp_key("9996665555")
+    assert auth_service.redis_client.get(key) == "1234"
+    ttl = auth_service.redis_client.ttl(key)
+    assert 0 < ttl <= auth_service.OTP_TTL_SECONDS
+
+
+def test_verifying_an_otp_deletes_it_from_redis(client):
+    from app.services import auth_service
+
+    r = client.post("/auth/otp/request", json={"phone": "9995554444"})
+    otp = r.json()["dev_otp"]
+    client.post("/auth/otp/verify", json={"phone": "9995554444", "code": otp})
+
+    key = auth_service._otp_key("9995554444")
+    assert auth_service.redis_client.get(key) is None
+
+
 def test_protected_endpoint_rejects_missing_token(client):
     r = client.get("/zones")
     assert r.status_code in (401, 403)

@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Shared state across backend processes -- the OTP store, the rate
+    # limiter's counters, and the tick-stream WS pub/sub all live here
+    # instead of in-process memory, so this app can run as more than
+    # one worker/container and still behave consistently.
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # Auth
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
