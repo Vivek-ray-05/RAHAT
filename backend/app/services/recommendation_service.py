@@ -65,7 +65,11 @@ def execute(session: Session, recommendation: Recommendation, payload: dict | No
     if shelter_id and assigned_population:
         shelter = session.get(Shelter, shelter_id)
         if shelter:
-            shelter.current_occupancy += assigned_population
+            # Never let an approval push a shelter past its real capacity,
+            # even if a reviewer's modified payload asked for more than
+            # what's left -- clamp to what's actually available.
+            remaining = max(0, shelter.capacity - shelter.current_occupancy)
+            shelter.current_occupancy += min(assigned_population, remaining)
             session.add(shelter)
 
     recommendation.status = RecommendationStatus.EXECUTED

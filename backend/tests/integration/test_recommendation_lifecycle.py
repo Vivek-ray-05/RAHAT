@@ -126,3 +126,93 @@ def test_coordinator_sees_pending_recommendations_across_all_zones(client, make_
     r = client.get("/recommendations", headers=headers)
     zone_ids = {rec["zone_id"] for rec in r.json()}
     assert zone_ids == {zone_a.id, zone_b.id}
+
+
+def test_zone_admin_cannot_approve_another_zones_recommendation(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    own_zone = make_zone()
+    other_zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="cross1@test.dev", zone_id=own_zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, other_zone.id)
+
+    headers = _login(client, "cross1@test.dev", "pw", "zone_admin")
+    r = client.post(f"/recommendations/{rec.id}/approve", headers=headers)
+    assert r.status_code == 403
+
+
+def test_zone_admin_cannot_modify_another_zones_recommendation(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    own_zone = make_zone()
+    other_zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="cross2@test.dev", zone_id=own_zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, other_zone.id)
+
+    headers = _login(client, "cross2@test.dev", "pw", "zone_admin")
+    r = client.post(
+        f"/recommendations/{rec.id}/modify",
+        json={"modified_payload": {"assigned_shelter_id": None, "assigned_population": 0}},
+        headers=headers,
+    )
+    assert r.status_code == 403
+
+
+def test_zone_admin_cannot_reject_another_zones_recommendation(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    own_zone = make_zone()
+    other_zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="cross3@test.dev", zone_id=own_zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, other_zone.id)
+
+    headers = _login(client, "cross3@test.dev", "pw", "zone_admin")
+    r = client.post(f"/recommendations/{rec.id}/reject", json={"reason": "not mine"}, headers=headers)
+    assert r.status_code == 403
+
+
+def test_zone_admin_can_still_approve_their_own_zones_recommendation(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="own1@test.dev", zone_id=zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, zone.id)
+
+    headers = _login(client, "own1@test.dev", "pw", "zone_admin")
+    r = client.post(f"/recommendations/{rec.id}/approve", headers=headers)
+    assert r.status_code == 200
+
+
+def test_coordinator_can_approve_any_zones_recommendation(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    zone = make_zone()
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="coordapprove@test.dev")
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, zone.id)
+
+    headers = _login(client, "coordapprove@test.dev", "pw", "central_coordinator")
+    r = client.post(f"/recommendations/{rec.id}/approve", headers=headers)
+    assert r.status_code == 200
+
+
+def test_modify_clamps_assigned_population_to_remaining_shelter_capacity(
+    client, make_user, make_zone, make_shelter, make_run, make_tick, make_recommendation,
+):
+    zone = make_zone()
+    shelter = make_shelter(zone.id, capacity=500, current_occupancy=450)
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="clamp@test.dev", zone_id=zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, zone.id)
+
+    headers = _login(client, "clamp@test.dev", "pw", "zone_admin")
+    r = client.post(
+        f"/recommendations/{rec.id}/modify",
+        json={"modified_payload": {"assigned_shelter_id": shelter.id, "assigned_population": 10000}},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    shelters_after = client.get("/shelters", headers=headers).json()
+    updated = next(s for s in shelters_after if s["id"] == shelter.id)
+    assert updated["current_occupancy"] == 500  # clamped to capacity, not 10450

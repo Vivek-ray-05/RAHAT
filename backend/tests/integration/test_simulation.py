@@ -107,3 +107,70 @@ def test_ws_streams_the_latest_tick_to_an_authenticated_client(client, make_user
         client.post(f"/simulation/{run_id}/tick", headers=headers)
         msg = ws.receive_json()
         assert msg["tick_number"] == 0
+
+
+def test_citizen_cannot_start_a_simulation(client, make_user, make_zone, make_scenario):
+    make_user(RoleEnum.CITIZEN, password="pw", email="citizensim@test.dev")
+    make_zone()
+    scenario = make_scenario()
+    headers = _login(client, "citizensim@test.dev", "pw", "citizen")
+    r = client.post("/simulation/start", json={"scenario_id": scenario.id}, headers=headers)
+    assert r.status_code == 403
+
+
+def test_zone_admin_cannot_advance_a_tick(client, make_user, make_zone, make_scenario, make_run):
+    zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="zaSim@test.dev", zone_id=zone.id)
+    coord = make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="coordsim2@test.dev")
+    run = make_run(started_by=coord)
+
+    headers = _login(client, "zaSim@test.dev", "pw", "zone_admin")
+    r = client.post(f"/simulation/{run.id}/tick", headers=headers)
+    assert r.status_code == 403
+
+
+def test_citizen_cannot_pause_resume_or_complete_a_run(client, make_user, make_run):
+    coord = make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="coordsim3@test.dev")
+    run = make_run(started_by=coord)
+    make_user(RoleEnum.CITIZEN, password="pw", email="citizensim2@test.dev")
+    headers = _login(client, "citizensim2@test.dev", "pw", "citizen")
+
+    assert client.post(f"/simulation/{run.id}/pause", headers=headers).status_code == 403
+    assert client.post(f"/simulation/{run.id}/resume", headers=headers).status_code == 403
+    assert client.post(f"/simulation/{run.id}/complete", headers=headers).status_code == 403
+
+
+def test_coordinator_can_still_control_a_simulation(client, make_user, make_zone, make_scenario):
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="coordsim4@test.dev")
+    make_zone()
+    scenario = make_scenario()
+    headers = _login(client, "coordsim4@test.dev", "pw", "central_coordinator")
+    run_id = client.post("/simulation/start", json={"scenario_id": scenario.id}, headers=headers).json()["id"]
+    assert client.post(f"/simulation/{run_id}/tick", headers=headers).status_code == 200
+    assert client.post(f"/simulation/{run_id}/pause", headers=headers).status_code == 200
+    assert client.post(f"/simulation/{run_id}/resume", headers=headers).status_code == 200
+    assert client.post(f"/simulation/{run_id}/complete", headers=headers).status_code == 200
+
+
+def test_latest_tick_requires_authentication(client, make_user, make_zone, make_scenario):
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="sim7@test.dev")
+    make_zone()
+    scenario = make_scenario()
+    headers = _login(client, "sim7@test.dev", "pw", "central_coordinator")
+    run_id = client.post("/simulation/start", json={"scenario_id": scenario.id}, headers=headers).json()["id"]
+    client.post(f"/simulation/{run_id}/tick", headers=headers)
+
+    r = client.get(f"/simulation/{run_id}/latest-tick")
+    assert r.status_code in (401, 403)
+
+
+def test_latest_tick_works_with_valid_authentication(client, make_user, make_zone, make_scenario):
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="sim8@test.dev")
+    make_zone()
+    scenario = make_scenario()
+    headers = _login(client, "sim8@test.dev", "pw", "central_coordinator")
+    run_id = client.post("/simulation/start", json={"scenario_id": scenario.id}, headers=headers).json()["id"]
+    client.post(f"/simulation/{run_id}/tick", headers=headers)
+
+    r = client.get(f"/simulation/{run_id}/latest-tick", headers=headers)
+    assert r.status_code == 200

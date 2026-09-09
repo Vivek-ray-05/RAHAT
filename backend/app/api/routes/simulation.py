@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from jose import JWTError
 from sqlmodel import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
 from app.core.roles import RoleEnum
 from app.core.security import decode_access_token
 from app.db.session import get_session
@@ -14,6 +14,8 @@ from app.schemas.simulation import SimulationRunResponse, StartSimulationRequest
 from app.services import simulation_service as svc
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
+
+_coordinator_only = require_role(RoleEnum.CENTRAL_COORDINATOR)
 
 
 def _get_run_or_404(session: Session, run_id: int) -> SimulationRun:
@@ -27,7 +29,7 @@ def _get_run_or_404(session: Session, run_id: int) -> SimulationRun:
 def start(
     payload: StartSimulationRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_coordinator_only),
 ):
     try:
         run = svc.start_simulation(session, payload.scenario_id, current_user.id)
@@ -40,7 +42,7 @@ def start(
 def advance(
     run_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_coordinator_only),
 ):
     run = _get_run_or_404(session, run_id)
     try:
@@ -51,7 +53,11 @@ def advance(
 
 
 @router.get("/{run_id}/latest-tick", response_model=TickResponse)
-def latest_tick(run_id: int, session: Session = Depends(get_session)):
+def latest_tick(
+    run_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     tick = svc.get_latest_tick(session, run_id)
     if tick is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No ticks yet for this run")
@@ -62,7 +68,7 @@ def latest_tick(run_id: int, session: Session = Depends(get_session)):
 def pause(
     run_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_coordinator_only),
 ):
     run = _get_run_or_404(session, run_id)
     return svc.pause_simulation(session, run)
@@ -72,7 +78,7 @@ def pause(
 def resume(
     run_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_coordinator_only),
 ):
     run = _get_run_or_404(session, run_id)
     return svc.resume_simulation(session, run)
@@ -82,7 +88,7 @@ def resume(
 def complete(
     run_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_coordinator_only),
 ):
     run = _get_run_or_404(session, run_id)
     return svc.complete_simulation(session, run)
