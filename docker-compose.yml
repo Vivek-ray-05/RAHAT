@@ -38,6 +38,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://rahat:rahat@postgres:5432/rahat
       REDIS_URL: redis://redis:6379/0
+      UVICORN_RELOAD: "true"
     ports:
       - "8000:8000"
     depends_on:
@@ -60,6 +61,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://rahat:rahat@postgres:5432/rahat
       REDIS_URL: redis://redis:6379/0
+      UVICORN_RELOAD: "true"
     ports:
       - "8001:8000"
     depends_on:
