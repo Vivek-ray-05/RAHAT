@@ -46,6 +46,7 @@ from sqlmodel import Session, select
 
 from app.db.session import engine, init_db
 from app.core.enums import ElevationTier
+from app.engines.risk.risk_agent import compute_baseline_flood_risk
 from app.models import (  # noqa: F401 -- import so tables register
     user, zone, shelter, road, scenario, simulation,
     sensor_event, citizen_report, risk_score, vulnerability_score, route_option,
@@ -99,8 +100,15 @@ DATA_QUALITY_NOTES = {
         "note": f"OSM Overpass amenity=hospital within {BUILDING_COUNT_RADIUS_M}m radius",
     },
     "flood_risk_base": {
-        "quality": "unavailable",
-        "note": "not yet computed -- reserved for a future baseline model",
+        "quality": "derived",
+        "note": (
+            "ranked from real elevation_m across all seeded zones, same relative "
+            "method as elevation_tier -- a qualitative check against real Bengaluru "
+            "flood history (2026-09-09) found this correctly ranks 10 of 12 real "
+            "documented flood zones into the more-flood-prone half; it can't see "
+            "lake-encroachment/drainage-driven flooding (e.g. JP Nagar, Electronic "
+            "City), only elevation"
+        ),
     },
 }
 
@@ -250,6 +258,7 @@ def seed() -> None:
     print("Fetching real elevation from opentopodata...")
     elevations = fetch_elevations()
     elevation_tiers = classify_elevation_tiers(elevations)
+    baseline_flood_risk = compute_baseline_flood_risk(elevations)
 
     hospital_counts: dict[str, int] = {z["code"]: 0 for z in ZONE_DEFS}
     shelter_candidates: dict[str, list[str]] = {z["code"]: [] for z in ZONE_DEFS}
@@ -286,6 +295,7 @@ def seed() -> None:
                 existing.hospital_count = hospital_counts[code]
                 existing.elevation_m = round(elevations[code])
                 existing.elevation_tier = elevation_tiers[code]
+                existing.flood_risk_base = baseline_flood_risk[code]
                 existing.data_quality_json = DATA_QUALITY_NOTES
                 session.add(existing)
                 session.commit()
@@ -300,7 +310,7 @@ def seed() -> None:
                 code=code, name=zdef["name"], population=population_estimate,
                 elderly_pct=CITYWIDE_ELDERLY_PCT, population_density=None,
                 elevation_tier=elevation_tiers[code], elevation_m=round(elevations[code]),
-                hospital_count=hospital_counts[code], flood_risk_base=None,
+                hospital_count=hospital_counts[code], flood_risk_base=baseline_flood_risk[code],
                 data_quality_json=DATA_QUALITY_NOTES,
             )
             session.add(z)
