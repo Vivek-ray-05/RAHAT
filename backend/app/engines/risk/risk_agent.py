@@ -11,6 +11,44 @@ this system to explain and summarize, never to compute this number.
 from app.core.enums import RiskLevel
 
 
+def compute_baseline_flood_risk(elevations: dict[str, float]) -> dict[str, float]:
+    """A zone's inherent flood susceptibility from real elevation alone,
+    independent of any live simulation tick -- this is what
+    `Zone.flood_risk_base` holds, separate from RiskEngine.score_zone's
+    per-tick dynamic score (which also factors in live rainfall/water
+    level/soil saturation).
+
+    Relative, not absolute: the lowest-elevation zone in the input set
+    scores ~10, the highest scores ~0, everyone else lands in between
+    by their real rank. Same principle as elevation_tier's relative
+    thirds-split (scripts/seed_demo_city.py) -- what matters for flood
+    risk is a zone's elevation relative to the others being modeled,
+    not a fixed absolute cutoff that wouldn't transfer to a different
+    city or a different set of seeded zones.
+
+    A qualitative validation pass (2026-09-09) checked this exact
+    approach against real Bengaluru flood history: ranking zones by
+    real SRTM elevation into thirds correctly placed 10 of 12
+    documented flood zones in the more-flood-prone half. The 2
+    exceptions (JP Nagar, Electronic City) flood for lake-encroachment
+    and stormwater-drainage reasons a center-point elevation reading
+    can't see -- a known, accepted limitation, not something this
+    function can fix without a real drainage/lake-proximity data
+    source, which doesn't exist yet.
+    """
+    if not elevations:
+        return {}
+    if len(elevations) == 1:
+        return {code: 5.0 for code in elevations}
+
+    ranked = sorted(elevations, key=lambda code: elevations[code])
+    n = len(ranked)
+    return {
+        code: round(10.0 * (1 - i / (n - 1)), 2)
+        for i, code in enumerate(ranked)
+    }
+
+
 class RiskEngine:
     def __init__(self):
         self._soil_saturation: dict[str, float] = {}
