@@ -15,3 +15,4 @@ class ZoneResponse(BaseModel):
     area_km2: float | None
     hospital_count: int
     flood_risk_base: float | None
+    data_quality_json: dict

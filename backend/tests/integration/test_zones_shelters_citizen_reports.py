@@ -7,6 +7,29 @@ def _login(client, email, password, role):
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+def test_zone_response_carries_data_quality_json(client, make_user, make_zone):
+    make_zone(
+        name="Provenance Zone",
+        data_quality_json={"population": {"quality": "estimated", "note": "test note"}},
+    )
+    make_user(RoleEnum.CITIZEN, password="pw", email="dq1@test.dev")
+    headers = _login(client, "dq1@test.dev", "pw", "citizen")
+
+    r = client.get("/zones", headers=headers)
+    zone = next(z for z in r.json() if z["name"] == "Provenance Zone")
+    assert zone["data_quality_json"]["population"]["quality"] == "estimated"
+
+
+def test_zone_defaults_to_empty_data_quality_json(client, make_user, make_zone):
+    make_zone(name="No Provenance Zone")
+    make_user(RoleEnum.CITIZEN, password="pw", email="dq2@test.dev")
+    headers = _login(client, "dq2@test.dev", "pw", "citizen")
+
+    r = client.get("/zones", headers=headers)
+    zone = next(z for z in r.json() if z["name"] == "No Provenance Zone")
+    assert zone["data_quality_json"] == {}
+
+
 def test_list_zones_returns_real_seeded_zones(client, make_user, make_zone):
     make_zone(name="Alpha")
     make_zone(name="Beta")

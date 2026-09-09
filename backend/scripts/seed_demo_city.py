@@ -64,6 +64,46 @@ ASSUMED_OCCUPANTS_PER_BUILDING = 4  # documented estimate, not a real demographi
 DEFAULT_SHELTER_CAPACITY = 500  # estimate -- OSM has no capacity data
 CITYWIDE_ELDERLY_PCT = 8.0  # single citywide estimate, no per-locality source available yet
 
+# Per-field provenance, identical for every seeded zone since they all
+# go through the same pipeline -- surfaced to the UI so a coordinator
+# can tell a real number (SRTM elevation, OSM hospital count) from an
+# estimate (building-derived population, a single citywide elderly_pct)
+# until a real institutional data partnership replaces the estimates.
+DATA_QUALITY_NOTES = {
+    "population": {
+        "quality": "estimated",
+        "note": f"OSM building count within {BUILDING_COUNT_RADIUS_M}m x {ASSUMED_OCCUPANTS_PER_BUILDING} assumed occupants/building -- not a census figure",
+    },
+    "elderly_pct": {
+        "quality": "estimated",
+        "note": f"single citywide figure ({CITYWIDE_ELDERLY_PCT}%), no per-locality source available yet",
+    },
+    "population_density": {
+        "quality": "unavailable",
+        "note": "not computed -- no reliable zone-boundary (area) source yet",
+    },
+    "elevation_m": {
+        "quality": "real",
+        "note": "SRTM 30m via opentopodata.org",
+    },
+    "elevation_tier": {
+        "quality": "derived",
+        "note": "ranked from real elevation_m across all seeded zones, split into thirds -- relative, not an absolute cutoff",
+    },
+    "area_km2": {
+        "quality": "unavailable",
+        "note": "not computed -- no reliable zone-boundary source yet",
+    },
+    "hospital_count": {
+        "quality": "real",
+        "note": f"OSM Overpass amenity=hospital within {BUILDING_COUNT_RADIUS_M}m radius",
+    },
+    "flood_risk_base": {
+        "quality": "unavailable",
+        "note": "not yet computed -- reserved for a future baseline model",
+    },
+}
+
 ZONE_DEFS = [
     {"code": "Z01", "name": "Marathahalli", "center": (12.9591, 77.6974)},
     {"code": "Z02", "name": "Bellandur", "center": (12.9304, 77.6784)},
@@ -246,6 +286,7 @@ def seed() -> None:
                 existing.hospital_count = hospital_counts[code]
                 existing.elevation_m = round(elevations[code])
                 existing.elevation_tier = elevation_tiers[code]
+                existing.data_quality_json = DATA_QUALITY_NOTES
                 session.add(existing)
                 session.commit()
                 session.refresh(existing)
@@ -260,6 +301,7 @@ def seed() -> None:
                 elderly_pct=CITYWIDE_ELDERLY_PCT, population_density=None,
                 elevation_tier=elevation_tiers[code], elevation_m=round(elevations[code]),
                 hospital_count=hospital_counts[code], flood_risk_base=None,
+                data_quality_json=DATA_QUALITY_NOTES,
             )
             session.add(z)
             session.commit()
