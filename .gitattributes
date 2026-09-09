@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings no matter what a contributor's
+# local core.autocrlf is set to -- a CRLF shebang line breaks
+# "#!/bin/sh" inside a Linux container (found the hard way: this repo
+# is developed on Windows and built into Linux Docker images/CI).
+*.sh text eol=lf
