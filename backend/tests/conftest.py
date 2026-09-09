@@ -17,6 +17,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from datetime import datetime, timedelta, timezone
 
+from app.core.rate_limit import limiter
 from app.core.roles import RoleEnum
 from app.core.security import hash_secret
 from app.db.session import get_session
@@ -39,6 +40,16 @@ def _create_schema():
     SQLModel.metadata.create_all(engine)
     yield
     SQLModel.metadata.drop_all(engine)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The rate limiter's counters are process-global and keyed by
+    client IP -- TestClient always looks like the same IP, so without
+    a reset, tests would trip each other's /auth/* limits. A real
+    client obviously doesn't get this reset between requests."""
+    limiter.reset()
+    yield
 
 
 @pytest.fixture()

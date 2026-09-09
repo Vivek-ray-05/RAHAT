@@ -67,3 +67,33 @@ def test_protected_endpoint_accepts_a_real_token(client, make_user):
     token = login.json()["access_token"]
     r = client.get("/zones", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
+
+
+def test_login_is_rate_limited_after_five_attempts_per_minute(client, make_user):
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="correct-horse", email="ratelimit1@test.dev")
+    for _ in range(5):
+        r = client.post("/auth/login", json={"email": "ratelimit1@test.dev", "password": "wrong", "role": "central_coordinator"})
+        assert r.status_code == 401
+    r = client.post("/auth/login", json={"email": "ratelimit1@test.dev", "password": "wrong", "role": "central_coordinator"})
+    assert r.status_code == 429
+
+
+def test_otp_request_is_rate_limited_after_five_attempts_per_minute(client):
+    for i in range(5):
+        r = client.post("/auth/otp/request", json={"phone": f"555000{i}"})
+        assert r.status_code == 200
+    r = client.post("/auth/otp/request", json={"phone": "5550009"})
+    assert r.status_code == 429
+
+
+def test_oversized_request_body_is_rejected(client, make_user):
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="bigbody@test.dev")
+    headers_login = client.post("/auth/login", json={"email": "bigbody@test.dev", "password": "pw", "role": "central_coordinator"})
+    token = headers_login.json()["access_token"]
+    huge_description = "x" * 2_000_000  # 2MB, over the 1MB cap
+    r = client.post(
+        "/citizen-reports",
+        json={"zone_id": 1, "description": huge_description},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 413

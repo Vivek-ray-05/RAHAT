@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import Session
 
+from app.core.rate_limit import limiter
 from app.db.session import get_session
 from app.schemas.auth import LoginRequest, OtpRequestRequest, OtpVerifyRequest, TokenResponse
 from app.services import auth_service
@@ -9,7 +10,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, session: Session = Depends(get_session)):
+@limiter.limit("5/minute")
+def login(request: Request, payload: LoginRequest, session: Session = Depends(get_session)):
     try:
         user = auth_service.authenticate_password(session, payload.email, payload.password, payload.role)
     except auth_service.AuthError as e:
@@ -20,7 +22,8 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
 
 
 @router.post("/otp/request")
-def request_otp(payload: OtpRequestRequest):
+@limiter.limit("5/minute")
+def request_otp(request: Request, payload: OtpRequestRequest):
     try:
         code = auth_service.request_otp(payload.phone)
     except NotImplementedError as e:
@@ -33,7 +36,8 @@ def request_otp(payload: OtpRequestRequest):
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
-def verify_otp(payload: OtpVerifyRequest, session: Session = Depends(get_session)):
+@limiter.limit("10/minute")
+def verify_otp(request: Request, payload: OtpVerifyRequest, session: Session = Depends(get_session)):
     try:
         user = auth_service.verify_otp(session, payload.phone, payload.code)
     except auth_service.AuthError as e:

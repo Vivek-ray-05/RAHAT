@@ -5,6 +5,7 @@ IMPORTANT: JWT_SECRET has no insecure default — the app refuses to start
 without it. This is a deliberate departure from the old prototype, which
 shipped with `JWT_SECRET = os.environ.get(..., "adeo_default_secret_change_in_prod")`.
 """
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,27 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def _guard_dev_mode_against_real_deployments(self) -> "Settings":
+        """DEV_MODE unlocks a fixed OTP code -- anyone can log in as
+        anyone. Cheap safety net: if it's on, every CORS origin must
+        look like local dev, or the app refuses to start. A real
+        deployment's CORS_ORIGINS points at a real domain, so this
+        catches DEV_MODE=true accidentally surviving into one."""
+        if self.DEV_MODE:
+            looks_local = all(
+                "localhost" in origin or "127.0.0.1" in origin
+                for origin in self.cors_origins_list
+            )
+            if not looks_local:
+                raise ValueError(
+                    "DEV_MODE=true but CORS_ORIGINS doesn't look like local dev "
+                    f"({self.CORS_ORIGINS!r}). Refusing to start -- DEV_MODE allows "
+                    "a fixed OTP code that lets anyone log in as anyone. Set "
+                    "DEV_MODE=false for any real deployment."
+                )
+        return self
 
     # Notification providers (Phase 6)
     TWILIO_ACCOUNT_SID: str | None = None
