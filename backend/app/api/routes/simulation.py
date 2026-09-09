@@ -1,10 +1,12 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from jose import JWTError
 from sqlmodel import Session
 
 from app.api.deps import get_current_user
 from app.core.roles import RoleEnum
+from app.core.security import decode_access_token
 from app.db.session import get_session
 from app.models.simulation import SimulationRun
 from app.models.user import User
@@ -87,11 +89,19 @@ def complete(
 
 
 @router.websocket("/{run_id}/ws")
-async def tick_stream(websocket: WebSocket, run_id: int, session: Session = Depends(get_session)):
-    """Basic tick-streaming WS: pushes a new payload whenever the
-    latest tick number changes. No auth or control commands yet --
-    that's Phase 4's job, once the approval workflow needs to gate
-    who can send commands over this connection."""
+async def tick_stream(websocket: WebSocket, run_id: int, token: str, session: Session = Depends(get_session)):
+    """Tick-streaming WS, gated by a JWT passed as ?token=. Pushes a
+    new payload whenever the latest tick number changes."""
+    try:
+        payload = decode_access_token(token)
+        user = session.get(User, int(payload.get("sub")))
+    except JWTError:
+        user = None
+
+    if user is None:
+        await websocket.close(code=4401)
+        return
+
     await websocket.accept()
     last_sent_tick_number: int | None = None
     try:

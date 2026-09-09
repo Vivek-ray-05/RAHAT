@@ -104,6 +104,10 @@ def advance_tick(session: Session, run: SimulationRun) -> SimulationTick:
     if not zones:
         raise SimulationError("No zones exist to simulate -- seed the city first")
 
+    # 0. Expire any recommendation from an earlier tick that a zone
+    # admin never acted on before its TTL ran out
+    recommendation_service.expire_stale(session, simulation_run_id=run.id)
+
     # 1. Synthetic sensor readings for this tick
     adapter = SyntheticFloodAdapter(
         zone_ids=[z.id for z in zones], tick=next_tick_number, severity=severity,
