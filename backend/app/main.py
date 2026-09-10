@@ -7,7 +7,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.config import settings
 from app.core.body_size_limit import BodySizeLimitMiddleware
 from app.core.rate_limit import limiter
-from app.api.routes import auth, simulation, recommendations, approvals, zones, shelters, citizen_reports, roads
+from app.api.routes import auth, simulation, recommendations, approvals, zones, shelters, citizen_reports, roads, reports
 
 app = FastAPI(title="RAHAT API")
 
@@ -32,6 +32,7 @@ app.include_router(zones.router)
 app.include_router(shelters.router)
 app.include_router(citizen_reports.router)
 app.include_router(roads.router)
+app.include_router(reports.router)
 
 
 @app.get("/health")
