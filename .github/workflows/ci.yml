@@ -89,6 +89,10 @@ jobs:
         working-directory: frontend
         run: npm audit --audit-level=high
 
+      - name: Run test suite
+        working-directory: frontend
+        run: npm test
+
       - name: Production build
         working-directory: frontend
         run: npm run build
