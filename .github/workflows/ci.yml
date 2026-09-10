@@ -32,11 +32,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # A real broker for mqtt_adapter.py's tests to publish/subscribe
+      # against -- not mocked. Default image config already allows
+      # anonymous pub/sub on 1883, verified locally before adding this.
+      mqtt:
+        image: eclipse-mosquitto:2
+        ports:
+          - 1883:1883
     env:
       JWT_SECRET: ci-test-secret-not-for-real-use
       DEV_MODE: "true"
       DATABASE_URL: postgresql+psycopg://rahat:rahat@localhost:5432/rahat_test
       REDIS_URL: redis://localhost:6379/0
+      MQTT_BROKER_HOST: localhost
     steps:
       - uses: actions/checkout@v4
 

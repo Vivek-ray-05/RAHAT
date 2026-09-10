@@ -27,6 +27,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # A real Mosquitto broker -- not a mock -- so mqtt_adapter.py can be
+  # demonstrated and tested against a genuine publish/subscribe round
+  # trip. The stock image's default config already listens on 1883
+  # with anonymous pub/sub, which is fine for this local/demo broker.
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+
   backend:
     build:
       context: ./backend
