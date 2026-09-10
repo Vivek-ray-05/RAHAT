@@ -8,6 +8,7 @@ import CoordinatorDashboard from './pages/CoordinatorDashboard.jsx'
 import CitizenDashboard from './pages/CitizenDashboard.jsx'
 import ZoneAdminDashboard from './pages/ZoneAdminDashboard.jsx'
 import NDRFDashboard from './pages/NDRFDashboard.jsx'
+import PostEventReportPage from './pages/PostEventReportPage.jsx'
 
 function App() {
   return (
@@ -46,6 +47,14 @@ function App() {
               element={
                 <ProtectedRoute roles={['ndrf']}>
                   <NDRFDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/report/:runId"
+              element={
+                <ProtectedRoute roles={['central_coordinator', 'zone_admin', 'ndrf']}>
+                  <PostEventReportPage />
                 </ProtectedRoute>
               }
             />
