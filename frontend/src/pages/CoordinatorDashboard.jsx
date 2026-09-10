@@ -51,6 +51,24 @@ export default function CoordinatorDashboard() {
 
   const highRiskZones = zones.filter((z) => (z.flood_risk_base ?? 0) >= 5)
 
+  const QUALITY_COLOR = {
+    real: 'text-green-400',
+    derived: 'text-amber-400',
+    estimated: 'text-gray-400',
+    unavailable: 'text-gray-600',
+  }
+
+  function qualityBadge(zone, field) {
+    const info = zone.data_quality_json?.[field]
+    if (!info) return null
+    const color = QUALITY_COLOR[info.quality] || 'text-gray-500'
+    return (
+      <span className={`${color} uppercase`} title={info.note}>
+        {info.quality}
+      </span>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] hero-grid text-white p-8">
       <div className="flex justify-between items-start mb-10">
@@ -80,13 +98,21 @@ export default function CoordinatorDashboard() {
             </p>
             <p className="font-mono text-gray-500 text-xs mb-3">
               {highRiskZones.length} zone(s) with elevated baseline flood risk
+              <span className="text-gray-700"> // hover a badge for data source</span>
             </p>
             <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
               {zones.map((z) => (
                 <div key={z.id} className="flex justify-between font-mono text-xs text-gray-400 border-b border-gray-800 pb-1">
                   <span>{z.name}</span>
-                  <span className="text-gray-600">
-                    pop {z.population.toLocaleString()} // {z.elevation_tier}
+                  <span className="text-gray-600 flex gap-2 items-center">
+                    <span title={z.data_quality_json?.population?.note}>
+                      pop {z.population.toLocaleString()}
+                    </span>
+                    //
+                    <span title={z.data_quality_json?.elevation_tier?.note}>{z.elevation_tier}</span>
+                    //
+                    risk {z.flood_risk_base != null ? z.flood_risk_base.toFixed(1) : 'n/a'}
+                    {qualityBadge(z, 'flood_risk_base')}
                   </span>
                 </div>
               ))}
