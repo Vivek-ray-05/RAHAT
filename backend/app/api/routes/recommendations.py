@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import authorize_recommendation_zone_access, get_current_user
 from app.core.roles import RoleEnum
 from app.db.session import get_session
 from app.models.recommendation import Recommendation
@@ -33,4 +33,5 @@ def get_one(
     rec = session.get(Recommendation, recommendation_id)
     if rec is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
+    authorize_recommendation_zone_access(rec, current_user)
     return rec

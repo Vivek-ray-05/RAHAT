@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.core.roles import RoleEnum
 from app.db.session import get_session
 from app.models.road import Road
@@ -11,9 +11,14 @@ from app.services import road_service
 
 router = APIRouter(prefix="/roads", tags=["roads"])
 
+# Road capacity/blockage is operational routing data for the roles that
+# act on it -- no citizen-facing UI reads this, so it's scoped the same
+# as blocking a road already was, rather than left open to any authenticated role.
+_operational_roles = require_role(RoleEnum.NDRF, RoleEnum.ZONE_ADMIN, RoleEnum.CENTRAL_COORDINATOR)
+
 
 @router.get("", response_model=list[RoadResponse])
-def list_roads(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+def list_roads(session: Session = Depends(get_session), current_user: User = Depends(_operational_roles)):
     return session.exec(select(Road)).all()
 
 
@@ -22,7 +27,7 @@ def block_road(
     road_id: int,
     payload: BlockRoadRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_role(RoleEnum.NDRF, RoleEnum.ZONE_ADMIN, RoleEnum.CENTRAL_COORDINATOR)),
+    current_user: User = Depends(_operational_roles),
 ):
     road = session.get(Road, road_id)
     if road is None:

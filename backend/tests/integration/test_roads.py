@@ -49,3 +49,20 @@ def test_blocking_an_unknown_road_is_404(client, make_user):
     headers = _login(client, "ndrf2@test.dev", "pw", "ndrf")
     r = client.post("/roads/999999/block", json={}, headers=headers)
     assert r.status_code == 404
+
+
+def test_citizen_cannot_list_roads(client, make_user):
+    make_user(RoleEnum.CITIZEN, password="pw", email="citizen_list_roads@test.dev")
+    headers = _login(client, "citizen_list_roads@test.dev", "pw", "citizen")
+    r = client.get("/roads", headers=headers)
+    assert r.status_code == 403
+
+
+def test_coordinator_can_list_roads(client, make_user, make_zone, make_road):
+    zone_a, zone_b = make_zone(), make_zone()
+    make_road(zone_a.id, zone_b.id)
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="coord_list_roads@test.dev")
+    headers = _login(client, "coord_list_roads@test.dev", "pw", "central_coordinator")
+    r = client.get("/roads", headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) >= 1

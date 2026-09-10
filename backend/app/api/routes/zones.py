@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
+from app.core.roles import RoleEnum
 from app.db.session import get_session
 from app.models.route_option import RouteOption
 from app.models.simulation import SimulationTick
@@ -22,7 +23,9 @@ def list_zones(session: Session = Depends(get_session), current_user: User = Dep
 def latest_route_for_zone(
     zone_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    # Route/capacity data for evacuation planning -- no citizen-facing UI
+    # uses this, unlike GET /zones above which the Citizen dashboard does.
+    current_user: User = Depends(require_role(RoleEnum.NDRF, RoleEnum.ZONE_ADMIN, RoleEnum.CENTRAL_COORDINATOR)),
 ):
     """The most recent route computed out of this zone -- ordered by
     the tick it was computed on, not by RouteOption.id, since a zone

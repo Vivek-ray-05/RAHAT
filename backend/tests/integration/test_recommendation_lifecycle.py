@@ -260,3 +260,40 @@ def test_creating_a_recommendation_does_not_notify_a_different_zones_admin(sessi
 
     notifications = session.exec(select(Notification)).all()
     assert len(notifications) == 0
+
+
+def test_zone_admin_cannot_read_another_zones_recommendation_by_id(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    own_zone = make_zone()
+    other_zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="readother@test.dev", zone_id=own_zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, other_zone.id)
+
+    headers = _login(client, "readother@test.dev", "pw", "zone_admin")
+    r = client.get(f"/recommendations/{rec.id}", headers=headers)
+    assert r.status_code == 403
+
+
+def test_zone_admin_can_read_their_own_zones_recommendation_by_id(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    zone = make_zone()
+    make_user(RoleEnum.ZONE_ADMIN, password="pw", email="readown@test.dev", zone_id=zone.id)
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, zone.id)
+
+    headers = _login(client, "readown@test.dev", "pw", "zone_admin")
+    r = client.get(f"/recommendations/{rec.id}", headers=headers)
+    assert r.status_code == 200
+
+
+def test_coordinator_can_read_any_zones_recommendation_by_id(client, make_user, make_zone, make_run, make_tick, make_recommendation):
+    zone = make_zone()
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="readcoord@test.dev")
+    run = make_run()
+    tick = make_tick(run.id)
+    rec = make_recommendation(run.id, tick.id, zone.id)
+
+    headers = _login(client, "readcoord@test.dev", "pw", "central_coordinator")
+    r = client.get(f"/recommendations/{rec.id}", headers=headers)
+    assert r.status_code == 200

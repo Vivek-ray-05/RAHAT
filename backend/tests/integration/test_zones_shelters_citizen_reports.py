@@ -57,11 +57,29 @@ def test_shelters_can_be_filtered_by_zone(client, make_user, make_zone, make_she
 
 def test_zone_with_no_route_yet_returns_404(client, make_user, make_zone):
     zone = make_zone()
-    make_user(RoleEnum.CITIZEN, password="pw", email="z2@test.dev")
-    headers = _login(client, "z2@test.dev", "pw", "citizen")
+    make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="z2@test.dev")
+    headers = _login(client, "z2@test.dev", "pw", "central_coordinator")
 
     r = client.get(f"/zones/{zone.id}/routes", headers=headers)
     assert r.status_code == 404
+
+
+def test_citizen_cannot_read_a_zones_route(client, make_user, make_zone):
+    zone = make_zone()
+    make_user(RoleEnum.CITIZEN, password="pw", email="z3@test.dev")
+    headers = _login(client, "z3@test.dev", "pw", "citizen")
+
+    r = client.get(f"/zones/{zone.id}/routes", headers=headers)
+    assert r.status_code == 403
+
+
+def test_ndrf_can_read_a_zones_route(client, make_user, make_zone):
+    zone = make_zone()
+    make_user(RoleEnum.NDRF, password="pw", email="z4@test.dev")
+    headers = _login(client, "z4@test.dev", "pw", "ndrf")
+
+    r = client.get(f"/zones/{zone.id}/routes", headers=headers)
+    assert r.status_code == 404  # no route computed yet, but not blocked by role
 
 
 def test_citizen_can_submit_a_report_and_it_is_attributed_to_them(client, make_user, make_zone):
