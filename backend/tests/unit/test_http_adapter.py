@@ -1,30 +1,19 @@
-import json
-import urllib.error
+import httpx
 
 from app.ingestion.http_adapter import HttpWeatherAdapter
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict):
-        self._body = json.dumps(payload).encode()
-
-    def read(self):
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
+def _fake_response(payload: dict, status_code: int = 200) -> httpx.Response:
+    return httpx.Response(status_code, json=payload, request=httpx.Request("GET", "https://api.open-meteo.com/v1/forecast"))
 
 
 def test_poll_or_receive_fetches_and_normalizes_real_shaped_response(monkeypatch):
-    def fake_urlopen(req, timeout=None):
-        assert "latitude=12.9591" in req.full_url
-        assert "longitude=77.6974" in req.full_url
-        return _FakeResponse({"current": {"precipitation": 4.2, "rain": 4.2, "temperature_2m": 24.1}})
+    def fake_get(url, params=None, headers=None, timeout=None):
+        assert params["latitude"] == 12.9591
+        assert params["longitude"] == 77.6974
+        return _fake_response({"current": {"precipitation": 4.2, "rain": 4.2, "temperature_2m": 24.1}})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     adapter = HttpWeatherAdapter(zone_coords={1: (12.9591, 77.6974)})
     readings = adapter.poll_or_receive()
@@ -36,10 +25,10 @@ def test_poll_or_receive_fetches_and_normalizes_real_shaped_response(monkeypatch
 
 
 def test_normalize_produces_a_valid_event_with_real_provenance(monkeypatch):
-    def fake_urlopen(req, timeout=None):
-        return _FakeResponse({"current": {"precipitation": 1.5}})
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _fake_response({"current": {"precipitation": 1.5}})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     adapter = HttpWeatherAdapter(zone_coords={1: (12.9591, 77.6974)}, simulation_run_id=7)
     raw = adapter.poll_or_receive()[0]
@@ -54,12 +43,24 @@ def test_normalize_produces_a_valid_event_with_real_provenance(monkeypatch):
 
 
 def test_unreachable_provider_is_skipped_not_raised(monkeypatch):
-    def fake_urlopen(req, timeout=None):
-        raise urllib.error.URLError("connection refused")
+    def fake_get(url, params=None, headers=None, timeout=None):
+        raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     adapter = HttpWeatherAdapter(zone_coords={1: (12.9591, 77.6974), 2: (12.9304, 77.6784)})
+    readings = adapter.poll_or_receive()
+
+    assert readings == []
+
+
+def test_non_200_response_is_skipped_not_raised(monkeypatch):
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _fake_response({"error": True, "reason": "bad request"}, status_code=400)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    adapter = HttpWeatherAdapter(zone_coords={1: (12.9591, 77.6974)})
     readings = adapter.poll_or_receive()
 
     assert readings == []
@@ -68,11 +69,11 @@ def test_unreachable_provider_is_skipped_not_raised(monkeypatch):
 def test_multiple_zones_each_get_their_own_reading(monkeypatch):
     calls = []
 
-    def fake_urlopen(req, timeout=None):
-        calls.append(req.full_url)
-        return _FakeResponse({"current": {"precipitation": 2.0}})
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(params)
+        return _fake_response({"current": {"precipitation": 2.0}})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     adapter = HttpWeatherAdapter(zone_coords={1: (12.9591, 77.6974), 2: (12.9304, 77.6784)})
     readings = adapter.poll_or_receive()
@@ -83,10 +84,10 @@ def test_multiple_zones_each_get_their_own_reading(monkeypatch):
 
 
 def test_ingest_persists_a_real_sensor_event_row(session, monkeypatch, make_run, make_zone):
-    def fake_urlopen(req, timeout=None):
-        return _FakeResponse({"current": {"precipitation": 3.3}})
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _fake_response({"current": {"precipitation": 3.3}})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     run = make_run()
     zone = make_zone()

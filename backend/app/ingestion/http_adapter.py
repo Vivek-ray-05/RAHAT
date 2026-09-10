@@ -17,11 +17,9 @@ happening right now" view. It fully implements
 `AbstractIngestionAdapter` and is ready to be pointed at real zone
 coordinates whenever that's wired up.
 """
-import json
-import urllib.error
-import urllib.request
-
 from datetime import datetime, timezone
+
+import httpx
 
 from app.ingestion.base import AbstractIngestionAdapter, NormalizedEvent
 
@@ -57,15 +55,19 @@ class HttpWeatherAdapter(AbstractIngestionAdapter):
         return readings
 
     def _fetch_current_conditions(self, lat: float, lon: float) -> dict | None:
-        url = (
-            f"{OPEN_METEO_URL}?latitude={lat}&longitude={lon}"
-            "&current=precipitation,rain,temperature_2m&timezone=auto"
-        )
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                body = json.loads(response.read())
-        except (urllib.error.URLError, TimeoutError, ValueError):
+            response = httpx.get(
+                OPEN_METEO_URL,
+                params={
+                    "latitude": lat, "longitude": lon,
+                    "current": "precipitation,rain,temperature_2m", "timezone": "auto",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError):
             # A live weather API being unreachable shouldn't crash a
             # tick -- treat it the same as "no reading this round" and
             # let the caller fall back to whatever else it has.
