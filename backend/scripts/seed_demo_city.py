@@ -54,6 +54,7 @@ from app.models import (  # noqa: F401 -- import so tables register
 from app.models.zone import Zone
 from app.models.shelter import Shelter
 from app.models.scenario import Scenario
+from app.models.route_option import RouteOption
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm30m"
@@ -359,11 +360,24 @@ def seed() -> None:
             placeholders = session.exec(
                 select(Shelter).where(Shelter.zone_id == zone_.id, Shelter.name.like("[PLACEHOLDER]%"))
             ).all()
+            removed = 0
             for p in placeholders:
+                # A placeholder can already be real production data --
+                # a live RouteOption may point at it from a run that
+                # already happened. Deleting it would violate that FK
+                # (found the hard way against the live DB, not a fresh
+                # one). Leave it in place rather than crash the whole
+                # seed run over one already-in-use shelter.
+                already_routed = session.exec(
+                    select(RouteOption).where(RouteOption.to_shelter_id == p.id)
+                ).first()
+                if already_routed is not None:
+                    continue
                 session.delete(p)
-            if placeholders:
+                removed += 1
+            if removed:
                 session.commit()
-                print(f"Removed {len(placeholders)} placeholder shelter(s) for {zdef['name']}")
+                print(f"Removed {removed} placeholder shelter(s) for {zdef['name']}")
 
         existing_codes = session.exec(select(Shelter.code)).all()
         next_num = max((int(c[1:]) for c in existing_codes), default=0) + 1
