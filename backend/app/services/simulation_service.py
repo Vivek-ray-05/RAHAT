@@ -75,6 +75,29 @@ def start_simulation(session: Session, scenario_id: int, started_by_user_id: int
     return run
 
 
+def list_runs(session: Session) -> list[dict]:
+    """Newest-first, with the scenario name and starter's name resolved
+    in -- the Simulation tab has nothing else to point at a run by."""
+    from app.models.user import User
+
+    runs = session.exec(select(SimulationRun).order_by(SimulationRun.started_at.desc())).all()
+    scenarios = {s.id: s for s in session.exec(select(Scenario)).all()}
+    users = {u.id: u for u in session.exec(select(User)).all()}
+
+    return [
+        {
+            "id": run.id,
+            "scenario_id": run.scenario_id,
+            "scenario_name": scenarios[run.scenario_id].name if run.scenario_id in scenarios else f"Scenario {run.scenario_id}",
+            "status": run.status,
+            "started_by_name": users[run.started_by_user_id].name if run.started_by_user_id in users else None,
+            "started_at": run.started_at,
+            "ended_at": run.ended_at,
+        }
+        for run in runs
+    ]
+
+
 def get_latest_tick(session: Session, simulation_run_id: int) -> SimulationTick | None:
     return session.exec(
         select(SimulationTick)

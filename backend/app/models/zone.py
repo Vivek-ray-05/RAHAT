@@ -14,6 +14,11 @@ class Zone ( SQLModel , table = True):
     area_km2: float | None = Field(default=None)
     hospital_count: int = Field(default=0)
     flood_risk_base: float | None = Field(default=None)
+    # Real coordinates -- the same ones scripts/seed_demo_city.py already
+    # fetches for its Overpass/elevation queries, just persisted now
+    # instead of being discarded after seeding.
+    center_lat: float | None = Field(default=None)
+    center_lon: float | None = Field(default=None)
     # Per-field provenance: {"population": {"quality": "estimated"|"real"|"derived"|"unavailable", "note": "..."}, ...}
     # -- so a coordinator can see which numbers are real (SRTM elevation,
     # OSM hospital counts) versus estimated (building-derived population,

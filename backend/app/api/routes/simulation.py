@@ -13,7 +13,7 @@ from app.core.security import decode_access_token
 from app.db.session import get_session
 from app.models.simulation import SimulationRun
 from app.models.user import User
-from app.schemas.simulation import SimulationRunResponse, StartSimulationRequest, TickResponse
+from app.schemas.simulation import SimulationRunListItem, SimulationRunResponse, StartSimulationRequest, TickResponse
 from app.services import simulation_service as svc
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
@@ -26,6 +26,14 @@ def _get_run_or_404(session: Session, run_id: int) -> SimulationRun:
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation run not found")
     return run
+
+
+@router.get("", response_model=list[SimulationRunListItem])
+def list_runs(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(_coordinator_only),
+):
+    return svc.list_runs(session)
 
 
 @router.post("/start", response_model=SimulationRunResponse)

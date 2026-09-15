@@ -9,3 +9,9 @@ class Shelter(SQLModel, table=True):
     capacity: int
     current_occupancy: int = Field(default=0)
     has_medical: bool = Field(default=False)
+    # Real coordinates -- from the same Overpass amenity node
+    # (hospital/school/community_centre) seed_demo_city.py already
+    # queries to name this shelter, just persisted now instead of
+    # keeping only the name.
+    lat: float | None = Field(default=None)
+    lon: float | None = Field(default=None)

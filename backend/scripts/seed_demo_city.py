@@ -53,6 +53,7 @@ from app.models import (  # noqa: F401 -- import so tables register
 )
 from app.models.zone import Zone
 from app.models.shelter import Shelter
+from app.models.scenario import Scenario
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm30m"
@@ -249,6 +250,29 @@ def nearest_zone_code(lat: float, lon: float) -> str:
     return min(ZONE_DEFS, key=dist)["code"]
 
 
+# Named for a coordinator picking one from a list, not for engine
+# logic -- severity is the only field simulation_service.py actually
+# reads (as a multiplier on synthetic rainfall/water-level readings).
+SCENARIO_DEFS = [
+    {"name": "Minor Flood Advisory", "scenario_type": "minor_flood", "severity": 0.6},
+    {"name": "Moderate Monsoon Flood", "scenario_type": "moderate_flood", "severity": 1.0},
+    {"name": "Severe Flash Flood", "scenario_type": "severe_flood", "severity": 1.6},
+]
+
+
+def seed_scenarios(session: Session) -> None:
+    for sdef in SCENARIO_DEFS:
+        existing = session.exec(select(Scenario).where(Scenario.name == sdef["name"])).first()
+        if existing:
+            continue
+        session.add(Scenario(
+            name=sdef["name"], scenario_type=sdef["scenario_type"],
+            config_json={"severity": sdef["severity"]},
+        ))
+        session.commit()
+        print(f"Created scenario: {sdef['name']} (severity={sdef['severity']})")
+
+
 def seed() -> None:
     init_db()
 
@@ -261,7 +285,9 @@ def seed() -> None:
     baseline_flood_risk = compute_baseline_flood_risk(elevations)
 
     hospital_counts: dict[str, int] = {z["code"]: 0 for z in ZONE_DEFS}
-    shelter_candidates: dict[str, list[str]] = {z["code"]: [] for z in ZONE_DEFS}
+    # (name, lat, lon) -- the amenity node's own real coordinates, not
+    # just its name, so the shelter can be placed on a real map later.
+    shelter_candidates: dict[str, list[tuple[str, float, float]]] = {z["code"]: [] for z in ZONE_DEFS}
     for el in amenities:
         tags = el.get("tags", {})
         amenity = tags.get("amenity")
@@ -271,7 +297,7 @@ def seed() -> None:
         if amenity == "hospital":
             hospital_counts[code] += 1
         elif amenity in ("school", "community_centre") and name:
-            shelter_candidates[code].append(name)
+            shelter_candidates[code].append((name, el["lat"], el["lon"]))
 
     print("Fetching real building counts for population estimates...")
     building_counts: dict[str, int] = {}
@@ -297,6 +323,7 @@ def seed() -> None:
                 existing.elevation_tier = elevation_tiers[code]
                 existing.flood_risk_base = baseline_flood_risk[code]
                 existing.data_quality_json = DATA_QUALITY_NOTES
+                existing.center_lat, existing.center_lon = zdef["center"]
                 session.add(existing)
                 session.commit()
                 session.refresh(existing)
@@ -312,6 +339,7 @@ def seed() -> None:
                 elevation_tier=elevation_tiers[code], elevation_m=round(elevations[code]),
                 hospital_count=hospital_counts[code], flood_risk_base=baseline_flood_risk[code],
                 data_quality_json=DATA_QUALITY_NOTES,
+                center_lat=zdef["center"][0], center_lon=zdef["center"][1],
             )
             session.add(z)
             session.commit()
@@ -343,24 +371,51 @@ def seed() -> None:
         for zdef in ZONE_DEFS:
             code = zdef["code"]
             zone_ = zones_by_code[code]
-            names = shelter_candidates[code][:2]  # cap at 2 per zone for a manageable dataset
+            candidates = shelter_candidates[code][:2]  # cap at 2 per zone for a manageable dataset
 
             existing_for_zone = session.exec(select(Shelter).where(Shelter.zone_id == zone_.id)).all()
             if existing_for_zone:
                 continue  # already has real (or still-placeholder, unresolved) shelters
 
-            if not names:
-                names = [f"[PLACEHOLDER] {zdef['name']} Community Shelter"]
+            if not candidates:
+                # No real amenity found for this zone -- placed at the
+                # zone's own center rather than left with no
+                # coordinates at all, same honesty convention as the
+                # "[PLACEHOLDER]" name already signals.
+                candidates = [(f"[PLACEHOLDER] {zdef['name']} Community Shelter", *zdef["center"])]
 
-            for name in names:
+            for name, lat, lon in candidates:
                 shelter_code = f"S{next_num:02d}"
                 next_num += 1
                 session.add(Shelter(
                     code=shelter_code, name=name, zone_id=zone_.id,
                     capacity=DEFAULT_SHELTER_CAPACITY, has_medical=False,
+                    lat=lat, lon=lon,
                 ))
                 session.commit()
                 print(f"Created shelter {shelter_code}: {name} ({zdef['name']})")
+
+        # Backfill coordinates on shelters seeded before lat/lon existed
+        # on the model -- matched to their real amenity node by name
+        # where we still have it, otherwise placed at their zone's center.
+        for zdef in ZONE_DEFS:
+            code = zdef["code"]
+            zone_ = zones_by_code[code]
+            candidates_by_name = {name: (lat, lon) for name, lat, lon in shelter_candidates[code]}
+            backfilled = 0
+            for existing_shelter in session.exec(select(Shelter).where(Shelter.zone_id == zone_.id)).all():
+                if existing_shelter.lat is not None:
+                    continue
+                existing_shelter.lat, existing_shelter.lon = candidates_by_name.get(
+                    existing_shelter.name, zdef["center"]
+                )
+                session.add(existing_shelter)
+                backfilled += 1
+            if backfilled:
+                session.commit()
+                print(f"Backfilled coordinates for {backfilled} shelter(s) in {zdef['name']}")
+
+        seed_scenarios(session)
 
 
 if __name__ == "__main__":
