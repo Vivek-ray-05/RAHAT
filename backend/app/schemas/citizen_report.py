@@ -9,6 +9,7 @@ class CitizenReportCreate(BaseModel):
     zone_id: int
     description: str
     media_url: str | None = None
+    is_sos: bool = False
 
 
 class CitizenReportResponse(BaseModel):
@@ -17,5 +18,6 @@ class CitizenReportResponse(BaseModel):
     zone_id: int
     description: str
     media_url: str | None
+    is_sos: bool
     status: CitizenReportStatus
     created_at: datetime

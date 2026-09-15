@@ -7,6 +7,7 @@ from app.core.roles import RoleEnum
 from app.core.security import decode_access_token
 from app.db.session import get_session
 from app.models.recommendation import Recommendation
+from app.models.shelter import Shelter
 from app.models.user import User
 
 bearer_scheme = HTTPBearer()
@@ -49,4 +50,14 @@ def authorize_recommendation_zone_access(rec: Recommendation, current_user: User
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This recommendation belongs to a different zone.",
+        )
+
+
+def authorize_shelter_zone_access(shelter: Shelter, current_user: User) -> None:
+    """Same zone-scoping as recommendations -- a zone admin edits only
+    their own zone's shelters. A coordinator (no zone_id) can edit any."""
+    if current_user.role == RoleEnum.ZONE_ADMIN and shelter.zone_id != current_user.zone_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This shelter belongs to a different zone.",
         )

@@ -21,6 +21,7 @@ def create_report(
         zone_id=payload.zone_id,
         description=payload.description,
         media_url=payload.media_url,
+        is_sos=payload.is_sos,
     )
     session.add(report)
     session.commit()
@@ -37,4 +38,7 @@ def list_reports(
     query = select(CitizenReport)
     if zone_id is not None:
         query = query.where(CitizenReport.zone_id == zone_id)
+    # SOS reports first -- someone scanning this list in an active
+    # incident needs the urgent ones surfaced, not buried by recency.
+    query = query.order_by(CitizenReport.is_sos.desc(), CitizenReport.created_at.desc())
     return session.exec(query).all()

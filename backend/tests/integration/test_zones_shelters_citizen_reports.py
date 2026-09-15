@@ -105,3 +105,45 @@ def test_citizen_reports_can_be_filtered_by_zone(client, make_user, make_zone):
     r = client.get("/citizen-reports", params={"zone_id": zone_a.id}, headers=headers)
     descriptions = {rep["description"] for rep in r.json()}
     assert descriptions == {"report A"}
+
+
+def test_a_report_defaults_to_not_being_an_sos(client, make_user, make_zone):
+    zone = make_zone()
+    make_user(RoleEnum.CITIZEN, password="pw", email="c3@test.dev")
+    headers = _login(client, "c3@test.dev", "pw", "citizen")
+
+    r = client.post("/citizen-reports", json={"zone_id": zone.id, "description": "minor puddling"}, headers=headers)
+
+    assert r.json()["is_sos"] is False
+
+
+def test_a_report_can_be_flagged_as_sos(client, make_user, make_zone):
+    zone = make_zone()
+    make_user(RoleEnum.CITIZEN, password="pw", email="c4@test.dev")
+    headers = _login(client, "c4@test.dev", "pw", "citizen")
+
+    r = client.post(
+        "/citizen-reports",
+        json={"zone_id": zone.id, "description": "SOS -- immediate help needed", "is_sos": True},
+        headers=headers,
+    )
+
+    assert r.status_code == 200
+    assert r.json()["is_sos"] is True
+
+
+def test_sos_reports_are_sorted_before_non_sos_reports(client, make_user, make_zone):
+    zone = make_zone()
+    make_user(RoleEnum.CITIZEN, password="pw", email="c5@test.dev")
+    headers = _login(client, "c5@test.dev", "pw", "citizen")
+
+    client.post("/citizen-reports", json={"zone_id": zone.id, "description": "regular report"}, headers=headers)
+    client.post(
+        "/citizen-reports",
+        json={"zone_id": zone.id, "description": "urgent report", "is_sos": True},
+        headers=headers,
+    )
+
+    r = client.get("/citizen-reports", params={"zone_id": zone.id}, headers=headers)
+    descriptions = [rep["description"] for rep in r.json()]
+    assert descriptions[0] == "urgent report"

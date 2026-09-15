@@ -11,5 +11,6 @@ class CitizenReport(SQLModel, table=True):
     zone_id: int = Field(foreign_key="zone.id")
     description: str
     media_url: str | None = Field(default=None)
+    is_sos: bool = Field(default=False)
     status: CitizenReportStatus = Field(default=CitizenReportStatus.NEW)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -50,6 +50,17 @@ describe('api client', () => {
     expect(JSON.parse(options.body)).toEqual({ zone_id: 3, description: 'flooding' })
   })
 
+  it('sends a JSON body and method on patch', async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+
+    await api.patch('/shelters/9', { current_occupancy: 120 })
+
+    const [url, options] = fetch.mock.calls[0]
+    expect(url).toContain('/shelters/9')
+    expect(options.method).toBe('PATCH')
+    expect(JSON.parse(options.body)).toEqual({ current_occupancy: 120 })
+  })
+
   it('throws an Error carrying the response status and detail on failure', async () => {
     fetch.mockResolvedValue({
       ok: false,

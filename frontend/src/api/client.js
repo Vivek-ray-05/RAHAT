@@ -42,4 +42,5 @@ async function request(path, options = {}) {
 export const api = {
   get: (path) => request(path, { method: 'GET' }),
   post: (path, body) => request(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  patch: (path, body) => request(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
 }

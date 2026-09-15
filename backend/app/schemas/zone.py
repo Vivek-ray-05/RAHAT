@@ -16,3 +16,5 @@ class ZoneResponse(BaseModel):
     hospital_count: int
     flood_risk_base: float | None
     data_quality_json: dict
+    center_lat: float | None
+    center_lon: float | None
