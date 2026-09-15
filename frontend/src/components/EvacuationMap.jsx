@@ -93,9 +93,13 @@ export default function EvacuationMap({
   return (
     <div style={{ height, width: '100%' }} className="border border-gray-800">
       <MapContainer center={BENGALURU_CENTER} zoom={11} scrollWheelZoom style={{ height: '100%', width: '100%' }}>
+        {/* OpenStreetMap's standard tile server -- no API key, no
+            signup, genuinely free. (CARTO's basemap URL used during
+            development turned out to require a key -- confirmed live,
+            switched before shipping.) */}
         <TileLayer
-          attribution='&copy; CARTO'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; OpenStreetMap contributors'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
         {liveRoads && liveRoads.map((road) => {
