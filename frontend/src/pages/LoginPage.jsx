@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 const ROLES = [
   { value: 'central_coordinator', label: 'CENTRAL_COORDINATOR', mode: 'password' },
   { value: 'zone_admin', label: 'ZONE_ADMIN', mode: 'password' },
-  { value: 'ndrf', label: 'NDRF', mode: 'otp' },
+  { value: 'ndrf', label: 'NDRF', mode: 'password' },
   { value: 'citizen', label: 'CITIZEN', mode: 'otp' },
 ]
 

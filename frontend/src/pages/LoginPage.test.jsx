@@ -40,7 +40,7 @@ describe('LoginPage', () => {
     expect(screen.getByPlaceholderText('PASSWORD')).toBeInTheDocument()
   })
 
-  it('switches to the OTP form for NDRF/citizen roles', async () => {
+  it('switches to the OTP form for the citizen role', async () => {
     const user = userEvent.setup()
     renderLogin()
 
@@ -48,6 +48,31 @@ describe('LoginPage', () => {
 
     expect(screen.getByPlaceholderText('PHONE')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('EMAIL')).not.toBeInTheDocument()
+  })
+
+  it('uses the password form for NDRF -- their demo account has a real password, not a phone', async () => {
+    const user = userEvent.setup()
+    renderLogin()
+
+    await user.click(screen.getByText('NDRF'))
+
+    expect(screen.getByPlaceholderText('EMAIL')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('PASSWORD')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('PHONE')).not.toBeInTheDocument()
+  })
+
+  it('logs in as NDRF with password and navigates to the rescue dashboard', async () => {
+    loginWithPassword.mockResolvedValue({ role: 'ndrf' })
+    const user = userEvent.setup()
+    renderLogin()
+
+    await user.click(screen.getByText('NDRF'))
+    await user.type(screen.getByPlaceholderText('EMAIL'), 'ndrf.bellandur@rahat.dev')
+    await user.type(screen.getByPlaceholderText('PASSWORD'), 'demo1234')
+    await user.click(screen.getByText('AUTHENTICATE →'))
+
+    expect(loginWithPassword).toHaveBeenCalledWith('ndrf.bellandur@rahat.dev', 'demo1234', 'ndrf')
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard/rescue')
   })
 
   it('logs in with password and navigates to the role home on success', async () => {
