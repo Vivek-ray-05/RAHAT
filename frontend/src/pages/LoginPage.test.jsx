@@ -113,7 +113,7 @@ describe('LoginPage', () => {
 
     expect(requestOtp).toHaveBeenCalledWith('9110001111')
     expect(await screen.findByPlaceholderText('CODE')).toBeInTheDocument()
-    expect(screen.getByText((_, el) => el?.textContent === 'DEV_MODE // CODE: 1234')).toBeInTheDocument()
+    expect(screen.getByText((_, el) => el?.textContent === 'DEMO_CODE: 1234')).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('CODE'), '1234')
     await user.click(screen.getByText('VERIFY →'))

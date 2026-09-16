@@ -155,7 +155,7 @@ export default function LoginPage() {
           <form onSubmit={handleVerifyOtp} className="flex flex-col gap-4">
             {devOtp && (
               <p className="font-mono text-xs text-gray-500 tracking-widest">
-                DEV_MODE // CODE: <span className="text-green-400">{devOtp}</span>
+                DEMO_CODE: <span className="text-green-400">{devOtp}</span>
               </p>
             )}
             <input
