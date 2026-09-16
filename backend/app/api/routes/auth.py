@@ -29,10 +29,12 @@ def request_otp(request: Request, payload: OtpRequestRequest):
     except NotImplementedError as e:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
 
-    # Only echo the code back in dev mode -- a real provider (Phase 6)
-    # would send it via SMS instead and return nothing sensitive here.
+    # Only echo the code back in dev mode or for an allowlisted demo
+    # phone number -- a real provider (Phase 6) would send it via SMS
+    # instead and return nothing sensitive here.
     from app.config import settings
-    return {"dev_otp": code} if settings.DEV_MODE else {"detail": "OTP sent"}
+    show_code = settings.DEV_MODE or auth_service.is_demo_otp_phone(payload.phone)
+    return {"dev_otp": code} if show_code else {"detail": "OTP sent"}
 
 
 @router.post("/otp/verify", response_model=TokenResponse)

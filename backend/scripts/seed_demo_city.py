@@ -282,6 +282,11 @@ def seed() -> None:
 
     print("Fetching real elevation from opentopodata...")
     elevations = fetch_elevations()
+    # fetch_elevations() is one all-or-nothing batch call -- a failure
+    # returns 0.0 for every zone, not per-zone like the other fetches.
+    # On a re-run that would silently blow away real elevation (and
+    # everything derived from it) for zones that already had it.
+    elevation_fetch_failed = all(v == 0.0 for v in elevations.values())
     elevation_tiers = classify_elevation_tiers(elevations)
     baseline_flood_risk = compute_baseline_flood_risk(elevations)
 
@@ -318,20 +323,32 @@ def seed() -> None:
 
             existing = session.exec(select(Zone).where(Zone.code == code)).first()
             if existing:
-                existing.population = population_estimate
-                existing.hospital_count = hospital_counts[code]
-                existing.elevation_m = round(elevations[code])
-                existing.elevation_tier = elevation_tiers[code]
-                existing.flood_risk_base = baseline_flood_risk[code]
+                # A re-run's own fetch can fail (rate-limited/unreachable,
+                # not rare against the free public Overpass instance) --
+                # 0 buildings/hospitals then means "this attempt got
+                # nothing," not "the real count is zero." Never let a
+                # failed re-fetch clobber a real number an earlier run
+                # already got (found the hard way: a re-run zeroed out
+                # population across every zone, including ones that had
+                # real counts from days earlier).
+                if building_count > 0 or existing.population == 0:
+                    existing.population = population_estimate
+                if hospital_counts[code] > 0 or existing.hospital_count == 0:
+                    existing.hospital_count = hospital_counts[code]
+                if not elevation_fetch_failed or existing.elevation_m in (None, 0):
+                    existing.elevation_m = round(elevations[code])
+                    existing.elevation_tier = elevation_tiers[code]
+                    existing.flood_risk_base = baseline_flood_risk[code]
                 existing.data_quality_json = DATA_QUALITY_NOTES
                 existing.center_lat, existing.center_lon = zdef["center"]
                 session.add(existing)
                 session.commit()
                 session.refresh(existing)
                 zones_by_code[code] = existing
-                print(f"Updated zone {code} ({existing.name}): population~{population_estimate} "
-                      f"(from {building_count} buildings), hospital_count={existing.hospital_count}, "
-                      f"elevation_m={existing.elevation_m} (tier={existing.elevation_tier.value})")
+                print(f"Updated zone {code} ({existing.name}): population={existing.population} "
+                      f"(this fetch: {building_count} buildings), hospital_count={existing.hospital_count} "
+                      f"(this fetch: {hospital_counts[code]}), elevation_m={existing.elevation_m} "
+                      f"(tier={existing.elevation_tier.value})")
                 continue
 
             z = Zone(

@@ -21,8 +21,12 @@ class AuthError(Exception):
     """Raised for any login failure the API layer should turn into a 401."""
 
 
+def is_demo_otp_phone(phone: str) -> bool:
+    return phone in settings.demo_otp_phones_list
+
+
 def request_otp(phone: str) -> str:
-    if not settings.DEV_MODE:
+    if not settings.DEV_MODE and not is_demo_otp_phone(phone):
         raise NotImplementedError(
             "No OTP provider configured. Set DEV_MODE=true for local "
             "testing, or wire a real provider in services/notification_service.py."

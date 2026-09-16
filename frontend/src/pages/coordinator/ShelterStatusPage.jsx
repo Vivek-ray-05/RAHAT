@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
 
 function occupancyColor(current, capacity) {
@@ -13,6 +13,7 @@ export default function ShelterStatusPage() {
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -30,7 +31,29 @@ export default function ShelterStatusPage() {
 
   useEffect(() => { load() }, [load])
 
-  const zoneName = (id) => zones.find((z) => z.id === id)?.name || `Zone ${id}`
+  const zoneName = useCallback((id) => zones.find((z) => z.id === id)?.name || `Zone ${id}`, [zones])
+
+  const groupedByZone = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    const matches = (s) => {
+      if (!query) return true
+      return s.name.toLowerCase().includes(query) || zoneName(s.zone_id).toLowerCase().includes(query)
+    }
+
+    const groups = new Map()
+    for (const s of shelters) {
+      if (!matches(s)) continue
+      const name = zoneName(s.zone_id)
+      if (!groups.has(name)) groups.set(name, [])
+      groups.get(name).push(s)
+    }
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [shelters, search, zoneName])
+
+  const visibleCount = groupedByZone.reduce((sum, [, list]) => sum + list.length, 0)
 
   return (
     <div className="text-white">
@@ -41,17 +64,42 @@ export default function ShelterStatusPage() {
 
       {!loading && (
         <div className="border border-gray-800 bg-surface-panel p-6 max-w-3xl">
-          <p className="font-mono text-green-400 text-sm font-bold mb-4">SHELTERS // {shelters.length}</p>
-          <div className="flex flex-col gap-2">
-            {shelters.map((s) => (
-              <div key={s.id} className="flex justify-between font-mono text-xs border-b border-gray-800 pb-1.5">
-                <div>
-                  <p className="text-gray-300">{s.name}</p>
-                  <p className="text-gray-600">{zoneName(s.zone_id)}{s.has_medical ? ' // MEDICAL' : ''}</p>
+          <div className="flex justify-between items-center mb-4 gap-4">
+            <p className="font-mono text-green-400 text-sm font-bold">
+              SHELTERS // {visibleCount}{visibleCount !== shelters.length ? ` of ${shelters.length}` : ''}
+            </p>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="SEARCH SHELTER OR ZONE"
+              className="bg-transparent border border-gray-700 focus:border-green-500 text-green-400 font-mono text-xs px-3 py-1.5 outline-none placeholder:text-gray-600 w-56"
+            />
+          </div>
+
+          {visibleCount === 0 && (
+            <p className="font-mono text-gray-500 text-xs">No shelters match "{search}".</p>
+          )}
+
+          <div className="flex flex-col gap-5">
+            {groupedByZone.map(([zone, list]) => (
+              <div key={zone}>
+                <p className="font-mono text-gray-500 text-[10px] tracking-widest uppercase mb-1.5">
+                  {zone} // {list.length}
+                </p>
+                <div className="flex flex-col gap-2">
+                  {list.map((s) => (
+                    <div key={s.id} className="flex justify-between font-mono text-xs border-b border-gray-800 pb-1.5">
+                      <p className="text-gray-300">
+                        {s.name}
+                        {s.has_medical && <span className="text-gray-600"> // MEDICAL</span>}
+                      </p>
+                      <span className={`font-bold ${occupancyColor(s.current_occupancy, s.capacity)}`}>
+                        {s.current_occupancy}/{s.capacity}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <span className={`font-bold ${occupancyColor(s.current_occupancy, s.capacity)}`}>
-                  {s.current_occupancy}/{s.capacity}
-                </span>
               </div>
             ))}
           </div>

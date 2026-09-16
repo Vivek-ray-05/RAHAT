@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     # Must default to False so a forgotten env var never ships an OTP bypass.
     DEV_MODE: bool = False
 
+    # Scoped demo bypass for production: a comma-separated allowlist of
+    # phone numbers that get the same fixed OTP as DEV_MODE, even with
+    # DEV_MODE=false -- lets someone actually try the citizen role on
+    # the live deployed demo without reopening the OTP bypass for every
+    # phone number the way DEV_MODE does. Empty by default.
+    DEMO_OTP_PHONES: str = ""
+
+    @property
+    def demo_otp_phones_list(self) -> list[str]:
+        return [p.strip() for p in self.DEMO_OTP_PHONES.split(",") if p.strip()]
+
     # CORS — comma-separated list of allowed origins, no wildcard in prod
     CORS_ORIGINS: str = "http://localhost:5173"
 

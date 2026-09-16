@@ -76,6 +76,55 @@ def test_verifying_an_otp_deletes_it_from_redis(client):
     assert auth_service.redis_client.get(key) is None
 
 
+def test_otp_request_is_blocked_outside_dev_mode_for_an_unlisted_phone(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", False)
+    monkeypatch.setattr(settings, "DEMO_OTP_PHONES", "")
+
+    r = client.post("/auth/otp/request", json={"phone": "9110001111"})
+
+    assert r.status_code == 501
+
+
+def test_otp_request_succeeds_outside_dev_mode_for_a_demo_allowlisted_phone(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", False)
+    monkeypatch.setattr(settings, "DEMO_OTP_PHONES", "9110001111, 9110002222")
+
+    r = client.post("/auth/otp/request", json={"phone": "9110001111"})
+
+    assert r.status_code == 200
+    assert r.json()["dev_otp"] == "1234"
+
+
+def test_demo_allowlist_does_not_open_up_other_phone_numbers(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", False)
+    monkeypatch.setattr(settings, "DEMO_OTP_PHONES", "9110001111")
+
+    r = client.post("/auth/otp/request", json={"phone": "9999999999"})
+
+    assert r.status_code == 501
+
+
+def test_demo_allowlisted_phone_can_fully_verify_and_log_in(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", False)
+    monkeypatch.setattr(settings, "DEMO_OTP_PHONES", "9110001111")
+
+    r = client.post("/auth/otp/request", json={"phone": "9110001111"})
+    otp = r.json()["dev_otp"]
+
+    r2 = client.post("/auth/otp/verify", json={"phone": "9110001111", "code": otp})
+
+    assert r2.status_code == 200
+    assert r2.json()["role"] == "citizen"
+
+
 def test_protected_endpoint_rejects_missing_token(client):
     r = client.get("/zones")
     assert r.status_code in (401, 403)
