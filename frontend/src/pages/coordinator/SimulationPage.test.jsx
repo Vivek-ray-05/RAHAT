@@ -17,8 +17,9 @@ vi.mock('react-router-dom', async () => {
 })
 
 const SCENARIO = { id: 3, name: 'Moderate Monsoon Flood', scenario_type: 'moderate_flood', config_json: { severity: 1.0 } }
-const RUNNING_RUN = { id: 7, scenario_id: 3, scenario_name: 'Moderate Monsoon Flood', status: 'running', started_by_name: 'Coordinator One', started_at: '2026-09-15T00:00:00Z', ended_at: null }
-const COMPLETED_RUN = { id: 4, scenario_id: 3, scenario_name: 'Moderate Monsoon Flood', status: 'completed', started_by_name: 'Coordinator One', started_at: '2026-09-14T00:00:00Z', ended_at: '2026-09-14T01:00:00Z' }
+const RUNNING_RUN = { id: 7, scenario_id: 3, scenario_name: 'Moderate Monsoon Flood', status: 'running', started_by_name: 'Coordinator One', started_at: '2026-09-15T00:00:00Z', ended_at: null, tick_count: 4 }
+const RUNNING_RUN_NO_TICKS = { id: 8, scenario_id: 3, scenario_name: 'Moderate Monsoon Flood', status: 'running', started_by_name: 'Coordinator One', started_at: '2026-09-15T00:00:00Z', ended_at: null, tick_count: 0 }
+const COMPLETED_RUN = { id: 4, scenario_id: 3, scenario_name: 'Moderate Monsoon Flood', status: 'completed', started_by_name: 'Coordinator One', started_at: '2026-09-14T00:00:00Z', ended_at: '2026-09-14T01:00:00Z', tick_count: 6 }
 
 function renderPage() {
   return render(
@@ -124,5 +125,69 @@ describe('SimulationPage', () => {
     renderPage()
 
     expect(await screen.findByText(/tick 2/)).toBeInTheDocument()
+  })
+
+  it('shows the real tick count next to each run', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/scenarios') return Promise.resolve([])
+      if (path === '/simulation') return Promise.resolve([RUNNING_RUN])
+      return Promise.resolve([])
+    })
+
+    renderPage()
+
+    expect(await screen.findByText(/4 ticks/)).toBeInTheDocument()
+  })
+
+  it('warns before completing a run that has no ticks, and does not complete on cancel', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/scenarios') return Promise.resolve([])
+      if (path === '/simulation') return Promise.resolve([RUNNING_RUN_NO_TICKS])
+      return Promise.resolve([])
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+
+    renderPage()
+    await user.click(await screen.findByText('COMPLETE'))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalledWith('/simulation/8/complete')
+    confirmSpy.mockRestore()
+  })
+
+  it('completes a zero-tick run anyway if the user confirms', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/scenarios') return Promise.resolve([])
+      if (path === '/simulation') return Promise.resolve([RUNNING_RUN_NO_TICKS])
+      return Promise.resolve([])
+    })
+    api.post.mockResolvedValue({})
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+
+    renderPage()
+    await user.click(await screen.findByText('COMPLETE'))
+
+    expect(api.post).toHaveBeenCalledWith('/simulation/8/complete')
+    confirmSpy.mockRestore()
+  })
+
+  it('does not prompt when completing a run that already has ticks', async () => {
+    api.get.mockImplementation((path) => {
+      if (path === '/scenarios') return Promise.resolve([])
+      if (path === '/simulation') return Promise.resolve([RUNNING_RUN])
+      return Promise.resolve([])
+    })
+    api.post.mockResolvedValue({})
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const user = userEvent.setup()
+
+    renderPage()
+    await user.click(await screen.findByText('COMPLETE'))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(api.post).toHaveBeenCalledWith('/simulation/7/complete')
+    confirmSpy.mockRestore()
   })
 })

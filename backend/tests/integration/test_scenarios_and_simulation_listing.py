@@ -43,6 +43,21 @@ def test_coordinator_can_list_simulation_runs_newest_first(client, make_user, ma
     top = next(row for row in r.json() if row["id"] == newer.id)
     assert top["started_by_name"] == coordinator.name
     assert top["scenario_name"]
+    assert top["tick_count"] == 0
+
+
+def test_run_list_reports_the_real_tick_count(client, make_user, make_run, make_tick):
+    coordinator = make_user(RoleEnum.CENTRAL_COORDINATOR, password="pw", email="runticks@test.dev")
+    run = make_run(started_by=coordinator)
+    make_tick(run.id)
+    make_tick(run.id)
+    make_tick(run.id)
+
+    headers = _login(client, "runticks@test.dev", "pw", "central_coordinator")
+    r = client.get("/simulation", headers=headers)
+
+    row = next(row for row in r.json() if row["id"] == run.id)
+    assert row["tick_count"] == 3
 
 
 def test_zone_admin_cannot_list_simulation_runs(client, make_user):

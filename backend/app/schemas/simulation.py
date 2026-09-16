@@ -32,3 +32,4 @@ class SimulationRunListItem(BaseModel):
     started_by_name: str | None
     started_at: datetime
     ended_at: datetime | None
+    tick_count: int

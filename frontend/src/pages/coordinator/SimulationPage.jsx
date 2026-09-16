@@ -61,7 +61,15 @@ export default function SimulationPage() {
     }
   }
 
-  async function handleAction(runId, action) {
+  async function handleAction(runId, action, run) {
+    if (action === 'complete' && (run?.tick_count ?? 0) === 0) {
+      const proceed = window.confirm(
+        'This run has no ticks yet, so its report will be empty. Click TICK a few times first ' +
+        'to generate real risk data (and possibly recommendations) before completing it.\n\n' +
+        'Complete anyway?'
+      )
+      if (!proceed) return
+    }
     setActing(true)
     setError('')
     try {
@@ -88,7 +96,14 @@ export default function SimulationPage() {
 
   return (
     <div className="text-white">
-      <h1 className="font-mono font-bold text-2xl mb-6">Simulation</h1>
+      <h1 className="font-mono font-bold text-2xl mb-2">Simulation</h1>
+      <p className="font-mono text-gray-500 text-xs mb-6 max-w-2xl leading-relaxed">
+        Pick a scenario and click START to begin a run. Click TICK to advance it one step at a
+        time -- each tick recomputes real flood risk for every zone and may generate a
+        recommendation for a zone admin to review. Watch it happen live below, or PAUSE/RESUME as
+        needed. Click COMPLETE once you're done to lock the run and view its report -- a run
+        completed with 0 ticks will have nothing in its report.
+      </p>
 
       {error && <p className="font-mono text-red-400 text-xs tracking-widest mb-4">{`ERROR: ${error}`}</p>}
       {loading && <p className="font-mono text-gray-500 text-sm">LOADING...</p>}
@@ -131,7 +146,7 @@ export default function SimulationPage() {
                       RUN_{run.id} // {run.scenario_name}
                     </p>
                     <p className="font-mono text-xs text-gray-600 mt-1">
-                      started by {run.started_by_name || 'unknown'} // {new Date(run.started_at).toLocaleString()}
+                      started by {run.started_by_name || 'unknown'} // {new Date(run.started_at).toLocaleString()} // {run.tick_count} tick{run.tick_count === 1 ? '' : 's'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -141,12 +156,12 @@ export default function SimulationPage() {
                     {run.status === 'running' && (
                       <>
                         <button onClick={() => handleTick(run.id)} disabled={acting} className="font-mono text-xs text-green-400 border border-green-500/50 px-2 py-1 hover:bg-green-500/10 disabled:opacity-40">TICK</button>
-                        <button onClick={() => handleAction(run.id, 'pause')} disabled={acting} className="font-mono text-xs text-amber-400 border border-amber-500/50 px-2 py-1 hover:bg-amber-500/10 disabled:opacity-40">PAUSE</button>
-                        <button onClick={() => handleAction(run.id, 'complete')} disabled={acting} className="font-mono text-xs text-gray-400 border border-gray-600 px-2 py-1 hover:bg-gray-500/10 disabled:opacity-40">COMPLETE</button>
+                        <button onClick={() => handleAction(run.id, 'pause', run)} disabled={acting} className="font-mono text-xs text-amber-400 border border-amber-500/50 px-2 py-1 hover:bg-amber-500/10 disabled:opacity-40">PAUSE</button>
+                        <button onClick={() => handleAction(run.id, 'complete', run)} disabled={acting} className="font-mono text-xs text-gray-400 border border-gray-600 px-2 py-1 hover:bg-gray-500/10 disabled:opacity-40">COMPLETE</button>
                       </>
                     )}
                     {run.status === 'paused' && (
-                      <button onClick={() => handleAction(run.id, 'resume')} disabled={acting} className="font-mono text-xs text-green-400 border border-green-500/50 px-2 py-1 hover:bg-green-500/10 disabled:opacity-40">RESUME</button>
+                      <button onClick={() => handleAction(run.id, 'resume', run)} disabled={acting} className="font-mono text-xs text-green-400 border border-green-500/50 px-2 py-1 hover:bg-green-500/10 disabled:opacity-40">RESUME</button>
                     )}
                     {run.status === 'completed' && (
                       <button onClick={() => navigate(`/report/${run.id}`)} className="font-mono text-xs text-blue-400 border border-blue-500/50 px-2 py-1 hover:bg-blue-500/10">VIEW_REPORT</button>

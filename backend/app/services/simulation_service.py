@@ -13,7 +13,7 @@ that only happens once a zone admin approves.
 import json
 from datetime import datetime, timezone
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.core.enums import SimulationStatus
 from app.core.redis_client import redis_client
@@ -84,6 +84,13 @@ def list_runs(session: Session) -> list[dict]:
     scenarios = {s.id: s for s in session.exec(select(Scenario)).all()}
     users = {u.id: u for u in session.exec(select(User)).all()}
 
+    tick_counts: dict[int, int] = {}
+    for run_id, count in session.exec(
+        select(SimulationTick.simulation_run_id, func.count())
+        .group_by(SimulationTick.simulation_run_id)
+    ):
+        tick_counts[run_id] = count
+
     return [
         {
             "id": run.id,
@@ -93,6 +100,7 @@ def list_runs(session: Session) -> list[dict]:
             "started_by_name": users[run.started_by_user_id].name if run.started_by_user_id in users else None,
             "started_at": run.started_at,
             "ended_at": run.ended_at,
+            "tick_count": tick_counts.get(run.id, 0),
         }
         for run in runs
     ]
